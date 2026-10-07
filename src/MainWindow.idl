@@ -1,0 +1,10 @@
+import "Models.idl";
+
+namespace DiscordWin3
+{
+    [default_interface]
+    runtimeclass MainWindow : Microsoft.UI.Xaml.Window
+    {
+        MainWindow();
+    }
+}

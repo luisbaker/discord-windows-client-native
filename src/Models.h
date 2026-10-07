@@ -20,6 +20,7 @@ namespace DiscordWin3
         double imageWidth = 0;
         double imageHeight = 0;
         std::wstring files;       // other attachments, one per line
+        bool forceHeader = false; // replies / system messages never collapse into the previous group
     };
 }
 

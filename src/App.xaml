@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="DiscordWin3.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedTheme="Dark">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Discord-like palette -->
+            <SolidColorBrush x:Key="RailBrush" Color="#1E1F22" />
+            <SolidColorBrush x:Key="SidebarBrush" Color="#2B2D31" />
+            <SolidColorBrush x:Key="ChatBrush" Color="#313338" />
+            <SolidColorBrush x:Key="ComposerBrush" Color="#383A40" />
+            <SolidColorBrush x:Key="BlurpleBrush" Color="#5865F2" />
+            <SolidColorBrush x:Key="MutedTextBrush" Color="#949BA4" />
+            <SolidColorBrush x:Key="HeaderTextBrush" Color="#F2F3F5" />
+            <SolidColorBrush x:Key="BodyTextBrush" Color="#DBDEE1" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
