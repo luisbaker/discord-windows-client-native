@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../SlimJson.h"
+
 namespace DiscordWin3::Discord
 {
     inline constexpr uint64_t PermAdministrator = 1ull << 3;
@@ -13,7 +15,7 @@ namespace DiscordWin3::Discord
         uint64_t deny;
     };
 
-    std::vector<Overwrite> ParseOverwrites(winrt::Windows::Data::Json::JsonArray const& array);
+    std::vector<Overwrite> ParseOverwrites(::DiscordWin3::Slim::Value const& array);
 
     // Everything needed to resolve the current user's permissions in one guild.
     struct GuildPermissions

@@ -144,6 +144,8 @@
     <ClInclude Include="Discord\Permissions.h" />
     <ClInclude Include="TokenStore.h" />
     <ClInclude Include="Strings.h" />
+    <ClInclude Include="SlimJson.h" />
+    <ClInclude Include="MemLog.h" />
     <ClInclude Include="ImageCache.h" />
     <ClInclude Include="third_party\qrcodegen.hpp" />
   </ItemGroup>
@@ -165,6 +167,7 @@
     <ClCompile Include="Discord\Permissions.cpp" />
     <ClCompile Include="TokenStore.cpp" />
     <ClCompile Include="Strings.cpp" />
+    <ClCompile Include="SlimJson.cpp" />
     <ClCompile Include="ImageCache.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="third_party\qrcodegen.cpp">

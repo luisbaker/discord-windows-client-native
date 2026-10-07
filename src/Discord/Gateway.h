@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../SlimJson.h"
+
 namespace DiscordWin3::Discord
 {
     enum class GatewayStatus
@@ -10,12 +12,21 @@ namespace DiscordWin3::Discord
         AuthFailed,
     };
 
+    // One dispatch: compact DOM for everything, plus a Windows.Data.Json copy for message events only.
+    struct DispatchEvent
+    {
+        std::wstring type;
+        std::shared_ptr<Slim::Document> doc;   // keeps `d` alive
+        Slim::Value d;
+        winrt::Windows::Data::Json::JsonObject json{ nullptr };
+    };
+
     // Discord gateway v9 over Windows.Networking.Sockets.MessageWebSocket (JSON, no compression).
     // Callbacks run on thread-pool threads; the consumer marshals to the UI thread.
     class Gateway : public std::enable_shared_from_this<Gateway>
     {
     public:
-        using DispatchHandler = std::function<void(std::wstring const& type, winrt::Windows::Data::Json::JsonObject const& d)>;
+        using DispatchHandler = std::function<void(DispatchEvent const& event)>;
         using StatusHandler = std::function<void(GatewayStatus status)>;
 
         Gateway(std::wstring token, DispatchHandler onDispatch, StatusHandler onStatus);

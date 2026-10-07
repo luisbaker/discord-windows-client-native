@@ -6,21 +6,15 @@ using namespace winrt::Windows::Data::Json;
 
 namespace DiscordWin3::Discord
 {
-    std::vector<Overwrite> ParseOverwrites(JsonArray const& array)
+    std::vector<Overwrite> ParseOverwrites(::DiscordWin3::Slim::Value const& array)
     {
         std::vector<Overwrite> result;
-        if (!array)
+        for (auto o : array)
         {
-            return result;
-        }
-        result.reserve(array.Size());
-        for (auto const& value : array)
-        {
-            if (value.ValueType() != JsonValueType::Object)
+            if (!o.IsObject())
             {
                 continue;
             }
-            auto o = value.GetObject();
             result.push_back({ Json::U64(o, L"id"), Json::U64(o, L"allow"), Json::U64(o, L"deny") });
         }
         return result;

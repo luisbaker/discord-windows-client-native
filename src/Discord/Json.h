@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../SlimJson.h"
+
 // Null-safe accessors over Windows.Data.Json (Discord sends `null` for many optional fields,
 // and the stock GetNamedXxx calls throw on a type mismatch).
 namespace DiscordWin3::Json
@@ -84,6 +86,42 @@ namespace DiscordWin3::Json
     {
         return U64(Str(o, key));
     }
+
+    // ---- Same helpers over the compact DOM (gateway payloads) ----
+
+    inline Slim::Value Get(Slim::Value o, std::wstring_view key)
+    {
+        auto v = o[key];
+        return v ? v : Slim::Value{};
+    }
+    inline std::wstring Str(Slim::Value o, std::wstring_view key) { return o[key].Str(); }
+    inline double Num(Slim::Value o, std::wstring_view key, double fallback = 0)
+    {
+        auto v = o[key];
+        return v.IsNumber() ? v.Num(fallback) : fallback;
+    }
+    inline bool Bool(Slim::Value o, std::wstring_view key, bool fallback = false) { return o[key].Bool(fallback); }
+    inline Slim::Value Obj(Slim::Value o, std::wstring_view key)
+    {
+        auto v = o[key];
+        return v.IsObject() ? v : Slim::Value{};
+    }
+    inline Slim::Value Arr(Slim::Value o, std::wstring_view key)
+    {
+        auto v = o[key];
+        return v.IsArray() ? v : Slim::Value{};
+    }
+    inline uint64_t U64(Slim::Value o, std::wstring_view key) { return U64(Str(o, key)); }
+
+    // Element helpers usable from code templated on either JSON flavor.
+    inline bool IsObject(IJsonValue const& v) { return v && v.ValueType() == JsonValueType::Object; }
+    inline JsonObject AsObject(IJsonValue const& v) { return v.GetObject(); }
+    inline bool IsString(IJsonValue const& v) { return v && v.ValueType() == JsonValueType::String; }
+    inline std::wstring AsString(IJsonValue const& v) { return std::wstring{ v.GetString() }; }
+    inline bool IsObject(Slim::Value const& v) { return v.IsObject(); }
+    inline Slim::Value AsObject(Slim::Value const& v) { return v; }
+    inline bool IsString(Slim::Value const& v) { return v.IsString(); }
+    inline std::wstring AsString(Slim::Value const& v) { return v.Str(); }
 
     // Snowflake -> unix milliseconds.
     inline int64_t SnowflakeMs(std::wstring_view id)

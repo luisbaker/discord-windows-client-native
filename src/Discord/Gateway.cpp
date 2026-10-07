@@ -277,27 +277,18 @@ namespace DiscordWin3::Discord
     void Gateway::OnText(hstring const& text, uint64_t generation)
     {
         bool big = text.size() > 64 * 1024;
-        JsonObject payload;
-        if (big)
-        {
-            ::DiscordWin3::MemLog(L"gateway: before parse", text.size());
-            auto slim = StripUnusedKeys(text);
-            ::DiscordWin3::MemLog(L"gateway: stripped", slim.size());
-            if (!JsonObject::TryParse(slim, payload))
-            {
-                return;
-            }
-            slim = {};
-        }
-        else if (!JsonObject::TryParse(text, payload))
+        if (big) ::DiscordWin3::MemLog(L"gateway: before parse", text.size());
+        auto doc = Slim::Document::Parse(big ? StripUnusedKeys(text) : std::wstring{ text });
+        if (!doc)
         {
             return;
         }
-        if (big) ::DiscordWin3::MemLog(L"gateway: after parse");
+        if (big) ::DiscordWin3::MemLog(L"gateway: after parse", doc->Nodes().size());
+        auto payload = doc->Root();
 
         int op = static_cast<int>(Json::Num(payload, L"op", -1));
-        std::wstring type;
-        JsonObject data{ nullptr };
+        DispatchEvent event;
+        event.doc = doc;
         {
             std::lock_guard guard{ m_lock };
             if (generation != m_generation || m_stopped)
@@ -305,9 +296,9 @@ namespace DiscordWin3::Discord
                 return;
             }
 
-            if (auto s = Json::Get(payload, L"s"))
+            if (auto s = payload[L"s"]; s.IsNumber())
             {
-                m_seq = static_cast<int64_t>(s.GetNumber());
+                m_seq = static_cast<int64_t>(s.Num());
             }
 
             switch (op)
@@ -337,8 +328,7 @@ namespace DiscordWin3::Discord
                 return;
             case InvalidSession:
             {
-                auto d = Json::Get(payload, L"d");
-                bool resumable = d && d.ValueType() == JsonValueType::Boolean && d.GetBoolean();
+                bool resumable = payload[L"d"].Bool(false);
                 if (!resumable)
                 {
                     m_sessionId.clear();
@@ -348,15 +338,15 @@ namespace DiscordWin3::Discord
                 return;
             }
             case Dispatch:
-                type = Json::Str(payload, L"t");
-                data = Json::Obj(payload, L"d");
-                if (type == L"READY")
+                event.type = Json::Str(payload, L"t");
+                event.d = Json::Obj(payload, L"d");
+                if (event.type == L"READY")
                 {
-                    m_sessionId = Json::Str(data, L"session_id");
-                    m_resumeUrl = Json::Str(data, L"resume_gateway_url");
+                    m_sessionId = Json::Str(event.d, L"session_id");
+                    m_resumeUrl = Json::Str(event.d, L"resume_gateway_url");
                     m_failures = 0;
                 }
-                else if (type == L"RESUMED")
+                else if (event.type == L"RESUMED")
                 {
                     m_failures = 0;
                 }
@@ -366,14 +356,21 @@ namespace DiscordWin3::Discord
             }
         }
 
-        if (type == L"READY" || type == L"RESUMED")
+        if (event.type == L"READY" || event.type == L"RESUMED")
         {
             m_onStatus(GatewayStatus::Connected);
         }
-        if (data)
+        if (!event.d)
         {
-            m_onDispatch(type, data);
+            return;
         }
+        // Message events (small) are still consumed through Windows.Data.Json by the message code.
+        if (event.type.starts_with(L"MESSAGE_") || event.type == L"TYPING_START")
+        {
+            JsonObject json{ nullptr };
+            if (JsonObject::TryParse(event.d.Raw(), json)) event.json = json;
+        }
+        m_onDispatch(event);
     }
 
     void Gateway::OnClosed(uint16_t code, uint64_t generation)

@@ -108,17 +108,21 @@ namespace winrt::DiscordWin3::implementation
         fire_and_forget RenderQr(std::wstring url);
         void StartSession(std::wstring token);
         void EndSession();
-        void OnDispatch(std::wstring const& type, Windows::Data::Json::JsonObject const& d);
+        void OnDispatch(::DiscordWin3::Discord::DispatchEvent const& e);
         void OnStatus(::DiscordWin3::Discord::GatewayStatus status);
 
         // Model
-        void HandleReady(Windows::Data::Json::JsonObject const& d);
-        GuildInfo ParseGuild(Windows::Data::Json::JsonObject const& g);
-        ChannelInfo ParseChannel(Windows::Data::Json::JsonObject const& c);
-        void ParseDmChannel(Windows::Data::Json::JsonObject const& c, ChannelInfo& info);
-        void ParseVoiceStates(GuildInfo& guild, Windows::Data::Json::JsonArray const& states);
+        void HandleReady(::DiscordWin3::Slim::Value const& d);
+        GuildInfo ParseGuild(::DiscordWin3::Slim::Value const& g);
+        ChannelInfo ParseChannel(::DiscordWin3::Slim::Value const& c);
+        void ParseDmChannel(::DiscordWin3::Slim::Value const& c, ChannelInfo& info);
+        void ParseVoiceState(GuildInfo& guild, ::DiscordWin3::Slim::Value const& state);
         UserInfo const& CacheUser(Windows::Data::Json::JsonObject const& user);
+        UserInfo const& CacheUser(::DiscordWin3::Slim::Value const& user);
+        template <typename O> UserInfo const& CacheUserT(O const& user);
         void CacheMember(GuildInfo const& guild, Windows::Data::Json::JsonObject const& member);
+        void CacheMember(GuildInfo const& guild, ::DiscordWin3::Slim::Value const& member);
+        template <typename O> void CacheMemberT(GuildInfo const& guild, O const& member);
         void UpsertGuild(GuildInfo guild);
         void RefreshGuildRail();
         void RefreshChannelList();
@@ -127,7 +131,7 @@ namespace winrt::DiscordWin3::implementation
         // Members (nick / guild avatar / role color), fetched lazily with gateway op 8
         void ApplyMember(::DiscordWin3::MessageData& data);
         void RequestMissingMembers();
-        void OnMembersChunk(Windows::Data::Json::JsonObject const& d);
+        void OnMembersChunk(::DiscordWin3::Slim::Value const& d);
 
         // Messages
         fire_and_forget LoadChannel(std::wstring id, std::wstring title);
@@ -154,8 +158,8 @@ namespace winrt::DiscordWin3::implementation
 
         // Member list sidebar (op 37 -> GUILD_MEMBER_LIST_UPDATE)
         void SubscribeMembers();
-        void OnMemberListUpdate(Windows::Data::Json::JsonObject const& d);
-        IInspectable BuildMemberRow(Windows::Data::Json::JsonObject const& item, GuildInfo const& guild);
+        void OnMemberListUpdate(::DiscordWin3::Slim::Value const& d);
+        IInspectable BuildMemberRow(::DiscordWin3::Slim::Value const& item, GuildInfo const& guild);
 
         // Typing indicator
         void OnTypingStart(Windows::Data::Json::JsonObject const& d);
@@ -164,8 +168,8 @@ namespace winrt::DiscordWin3::implementation
         void UpdateTitle();
 
         // Unread state (READY read_state + user_guild_settings, kept live by MESSAGE_CREATE / MESSAGE_ACK)
-        void ParseReadStates(Windows::Data::Json::JsonObject const& d);
-        void ParseGuildSettings(Windows::Data::Json::IJsonValue const& settings);
+        void ParseReadStates(::DiscordWin3::Slim::Value const& d);
+        void ParseGuildSettings(::DiscordWin3::Slim::Value const& settings);
         bool IsUnread(ChannelInfo const& channel) const;
         int MentionsIn(std::wstring const& channelId) const;
         std::pair<bool, int> GuildBadge(GuildInfo const& guild) const;
@@ -192,10 +196,10 @@ namespace winrt::DiscordWin3::implementation
         bool EditLastOwnMessage();
 
         // Home: friends, presence, quick switcher, history
-        void ParseRelationships(Windows::Data::Json::JsonObject const& d);
-        void ParsePresence(Windows::Data::Json::JsonObject const& p, std::wstring userId = {});
-        void OnPresenceUpdate(Windows::Data::Json::JsonObject const& d);
-        void OnRelationshipEvent(std::wstring const& type, Windows::Data::Json::JsonObject const& d);
+        void ParseRelationships(::DiscordWin3::Slim::Value const& d);
+        void ParsePresence(::DiscordWin3::Slim::Value const& p, std::wstring userId = {});
+        void OnPresenceUpdate(::DiscordWin3::Slim::Value const& d);
+        void OnRelationshipEvent(std::wstring const& type, ::DiscordWin3::Slim::Value const& d);
         uint32_t PresenceColor(std::wstring const& userId) const;
         std::wstring PresenceText(std::wstring const& userId, bool fallbackToStatus) const;
         void ShowFriends(bool show);
