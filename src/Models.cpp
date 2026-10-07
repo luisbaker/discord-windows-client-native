@@ -14,6 +14,9 @@
 #if __has_include("FriendItem.g.cpp")
 #include "FriendItem.g.cpp"
 #endif
+#if __has_include("ParticipantItem.g.cpp")
+#include "ParticipantItem.g.cpp"
+#endif
 #if __has_include("MemberItem.g.cpp")
 #include "MemberItem.g.cpp"
 #endif
@@ -89,6 +92,11 @@ namespace winrt::DiscordWin3::implementation
     ImageSource FriendItem::Avatar()
     {
         return ::DiscordWin3::ImageCache::Get(m_avatarUrl, 32);
+    }
+
+    ImageSource ParticipantItem::Avatar()
+    {
+        return ::DiscordWin3::ImageCache::Get(m_avatarUrl, 80);
     }
 
     ImageSource MemberItem::Avatar()

@@ -129,6 +129,9 @@
     X(UnmuteMic, L"Réactiver le micro", L"Unmute", L"Ativar microfone", L"Ativar microfone", L"Activar micrófono", L"Stummschaltung aufheben", L"Riattiva microfono") \
     X(Deafen, L"Mettre en sourdine", L"Deafen", L"Desativar som", L"Desativar áudio", L"Ensordecer", L"Taub schalten", L"Disattiva audio") \
     X(Undeafen, L"Réactiver le son", L"Undeafen", L"Ativar som", L"Ativar áudio", L"Activar audio", L"Ton einschalten", L"Riattiva audio") \
+    X(StatsForNerds, L"Stats pour les nerds", L"Stats for Nerds", L"Estatísticas para nerds", L"Estatísticas para nerds", L"Estadísticas para nerds", L"Statistiken für Nerds", L"Statistiche per nerd") \
+    X(ShareScreen, L"Partager ton écran", L"Share Your Screen", L"Partilhar o ecrã", L"Compartilhar sua tela", L"Compartir pantalla", L"Bildschirm teilen", L"Condividi lo schermo") \
+    X(ScreenShareSoon, L"Le partage d'écran (Go Live) arrive dans la prochaine version.", L"Screen sharing (Go Live) is coming in the next version.", L"A partilha de ecrã (Go Live) chega na próxima versão.", L"O compartilhamento de tela (Go Live) chega na próxima versão.", L"Compartir pantalla (Go Live) llegará en la próxima versión.", L"Bildschirmübertragung (Go Live) kommt in der nächsten Version.", L"La condivisione dello schermo (Go Live) arriverà nella prossima versione.") \
     X(StartCall, L"Démarrer un appel vocal", L"Start Voice Call", L"Iniciar chamada de voz", L"Iniciar chamada de voz", L"Iniciar llamada de voz", L"Sprachanruf starten", L"Avvia chiamata vocale")
 
 namespace DiscordWin3::I18n

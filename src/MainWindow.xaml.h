@@ -83,6 +83,9 @@ namespace winrt::DiscordWin3::implementation
         void OnToggleMute(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnToggleDeafen(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnStartCall(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnShareScreen(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnToggleStats(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnOpenCallView(IInspectable const&, Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const&);
         void OnPlayVideo(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         fire_and_forget OnDownloadMedia(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnHoverReaction(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -225,6 +228,9 @@ namespace winrt::DiscordWin3::implementation
         void OnVoiceServerUpdate(::DiscordWin3::Slim::Value const& d);
         void UpdateVoiceUserRow(std::wstring const& userId);
         void UpdateVoiceButtons();
+        void ShowCallView(bool show);
+        void RefreshCallParticipants();
+        void UpdateStatsText();
 
         // Translations
         void ApplyTexts();
@@ -296,6 +302,12 @@ namespace winrt::DiscordWin3::implementation
         bool m_selfMute = false;
         bool m_selfDeaf = false;
         std::unordered_set<std::wstring> m_speakingUsers;
+        std::unordered_set<std::wstring> m_dmCallUsers;                              // DM call participants
+        std::unordered_map<std::wstring, std::pair<bool, bool>> m_voiceFlags;         // userId -> (muted, deafened)
+        bool m_showingCall = false;
+        Microsoft::UI::Dispatching::DispatcherQueueTimer m_statsTimer{ nullptr };
+        Windows::Foundation::Collections::IObservableVector<IInspectable> m_callItems =
+            single_threaded_observable_vector<IInspectable>();
 
         struct Presence { std::wstring status; std::wstring activity; std::wstring game; bool hasActivity = false; };
         std::unordered_map<std::wstring, Presence> m_presence;            // userId -> presence (friends + DMs)

@@ -37,6 +37,27 @@ namespace DiscordWin3::Voice
             std::function<void(std::wstring const& userId, bool speaking)> onSpeaking;
         };
 
+        // "Stats for nerds": snapshot readable from any thread.
+        struct Stats
+        {
+            State state = State::Connecting;
+            std::wstring endpoint;
+            std::wstring mode;
+            uint32_t ssrc = 0;
+            int rttMs = -1;                 // voice gateway heartbeat round trip
+            uint16_t daveVersion = 0;       // 0 = DAVE off (passthrough)
+            bool daveReady = false;         // our encryptor has an MLS key ratchet
+            int participants = 0;
+            uint64_t packetsSent = 0, packetsReceived = 0;
+            uint64_t bytesSent = 0, bytesReceived = 0;
+            uint64_t packetsLost = 0;       // from RTP sequence gaps
+            uint64_t transportFailures = 0; // AES-GCM authentication failures
+            uint64_t e2eeDecryptFailures = 0;
+            uint64_t e2eeEncryptSkipped = 0;
+            bool speaking = false;
+        };
+        Stats GetStats();
+
         VoiceConnection(VoiceParams params, Callbacks callbacks);
         ~VoiceConnection();
 
@@ -114,5 +135,13 @@ namespace DiscordWin3::Voice
         uint16_t m_pendingTransition = 0;
         bool m_pendingPassthrough = false;
         bool m_pendingRatchets = false;
+
+        // Stats
+        std::atomic<State> m_state{ State::Connecting };
+        std::atomic<int> m_rtt{ -1 };
+        std::atomic<uint64_t> m_packetsSent{ 0 }, m_packetsReceived{ 0 }, m_bytesSent{ 0 }, m_bytesReceived{ 0 };
+        std::atomic<uint64_t> m_packetsLost{ 0 }, m_transportFailures{ 0 }, m_e2eeDecryptFailures{ 0 }, m_e2eeEncryptSkipped{ 0 };
+        struct SeqTrack { uint16_t last = 0; bool started = false; };
+        std::unordered_map<uint32_t, SeqTrack> m_seqTracks;   // receive thread only
     };
 }

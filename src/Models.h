@@ -5,6 +5,7 @@
 #include "MessageItem.g.h"
 #include "MemberItem.g.h"
 #include "FriendItem.g.h"
+#include "ParticipantItem.g.h"
 
 namespace DiscordWin3
 {
@@ -190,6 +191,29 @@ namespace winrt::DiscordWin3::implementation
         std::wstring m_id, m_name, m_tag, m_subtitle, m_avatarUrl;
         uint32_t m_statusColor;
         int m_relationship;
+    };
+
+    // One tile of the call screen.
+    struct ParticipantItem : ParticipantItemT<ParticipantItem>
+    {
+        ParticipantItem(std::wstring userId, std::wstring name, std::wstring avatarUrl, bool speaking, bool muted, bool deaf)
+            : m_userId(std::move(userId)), m_name(std::move(name)), m_avatarUrl(std::move(avatarUrl)),
+              m_speaking(speaking), m_muted(muted), m_deaf(deaf) {}
+
+        hstring UserId() const { return hstring{ m_userId }; }
+        hstring Name() const { return hstring{ m_name }; }
+        ImageSource Avatar();
+        Brush RingBrush() const { return m_speaking ? SolidBrush(0x23A55A) : SolidBrush(0, 0); }
+        Visibility MutedVisibility() const { return Show(m_muted && !m_deaf); }
+        Visibility DeafVisibility() const { return Show(m_deaf); }
+        std::wstring const& NameText() const { return m_name; }
+        std::wstring const& AvatarUrl() const { return m_avatarUrl; }
+        bool Muted() const { return m_muted; }
+        bool Deaf() const { return m_deaf; }
+
+    private:
+        std::wstring m_userId, m_name, m_avatarUrl;
+        bool m_speaking, m_muted, m_deaf;
     };
 
     struct MessageItem : MessageItemT<MessageItem>

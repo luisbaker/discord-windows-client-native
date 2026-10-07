@@ -113,6 +113,7 @@ namespace DiscordWin3::Voice
     void VoiceConnection::Fail(std::wstring const& detail)
     {
         if (m_stopped) return;
+        m_state = State::Failed;
         if (m_cb.onState) m_cb.onState(State::Failed, detail);
     }
 
@@ -318,7 +319,15 @@ namespace DiscordWin3::Voice
                 }
             }, std::chrono::milliseconds(200));
 
+            m_state = State::Connected;
             if (m_cb.onState) m_cb.onState(State::Connected, {});
+            break;
+        }
+        case HeartbeatAck:
+        {
+            // v8 echoes our nonce (a steady-clock timestamp): round trip to the voice server.
+            auto sent = static_cast<int64_t>(Json::Num(d, L"t", -1));
+            if (sent > 0) m_rtt = static_cast<int>(NowMs() - sent);
             break;
         }
         case Speaking:
@@ -638,6 +647,7 @@ namespace DiscordWin3::Voice
             if (daveEncryptorEncrypt(m_encryptor, DAVE_MEDIA_TYPE_AUDIO, m_ssrc, opus, length, e2ee, sizeof(e2ee), &e2eeLength)
                 != DAVE_ENCRYPTOR_RESULT_CODE_SUCCESS)
             {
+                ++m_e2eeEncryptSkipped;
                 return;   // no key yet (joining): Discord drops unencrypted frames anyway
             }
         }
@@ -658,7 +668,12 @@ namespace DiscordWin3::Voice
         uint8_t* tag = cipher + e2eeLength;
         if (!m_sendCrypto.Encrypt(nonce, packet, 12, e2ee, e2eeLength, cipher, tag)) return;
         PutU32(tag + 16, counter);
-        send(m_udp, reinterpret_cast<char const*>(packet), static_cast<int>(12 + e2eeLength + 16 + 4), 0);
+        int total = static_cast<int>(12 + e2eeLength + 16 + 4);
+        if (send(m_udp, reinterpret_cast<char const*>(packet), total, 0) == total)
+        {
+            ++m_packetsSent;
+            m_bytesSent += static_cast<uint64_t>(total);
+        }
     }
 
     void VoiceConnection::ReceiveLoop()
@@ -674,6 +689,7 @@ namespace DiscordWin3::Voice
                 continue;
             }
             size_t size = static_cast<size_t>(received);
+            m_bytesReceived += size;
             if (size < 12 + 16 + 4 || (packet[0] & 0xC0) != 0x80) continue;
             uint8_t payloadType = packet[1] & 0x7F;
             if (payloadType != 0x78) continue;   // RTCP and others
@@ -695,6 +711,7 @@ namespace DiscordWin3::Voice
             if (!m_recvCrypto.Decrypt(nonce, packet.data(), headerLength, packet.data() + headerLength, cipherLength,
                                       packet.data() + headerLength + cipherLength, plain.data()))
             {
+                ++m_transportFailures;
                 continue;
             }
             size_t skip = extensionWords * 4;
@@ -703,6 +720,22 @@ namespace DiscordWin3::Voice
             size_t frameLength = cipherLength - skip;
 
             uint32_t ssrc = GetU32(packet.data() + 8);
+            {
+                // Loss estimate from RTP sequence gaps (wrap-around safe).
+                uint16_t seq = GetU16(packet.data() + 2);
+                auto& track = m_seqTracks[ssrc];
+                if (track.started)
+                {
+                    auto ahead = static_cast<int16_t>(seq - track.last);
+                    if (ahead > 1 && ahead < 1000) m_packetsLost += static_cast<uint64_t>(ahead - 1);
+                    if (ahead > 0) track.last = seq;
+                }
+                else
+                {
+                    track.started = true;
+                    track.last = seq;
+                }
+            }
             std::string user;
             {
                 std::lock_guard guard{ m_peersLock };
@@ -718,9 +751,11 @@ namespace DiscordWin3::Voice
                 if (daveDecryptorDecrypt(decryptor, DAVE_MEDIA_TYPE_AUDIO, frame, frameLength, opus.data(), opus.size(), &opusLength)
                     != DAVE_DECRYPTOR_RESULT_CODE_SUCCESS)
                 {
+                    ++m_e2eeDecryptFailures;
                     continue;
                 }
             }
+            ++m_packetsReceived;
             if (opusLength == 3 && memcmp(opus.data(), OpusSilence, 3) == 0) continue;
 
             auto& decoder = m_decoders[ssrc];
@@ -737,5 +772,37 @@ namespace DiscordWin3::Voice
             std::lock_guard guard{ m_peersLock };
             m_lastHeard[user] = NowMs();
         }
+    }
+}
+
+namespace DiscordWin3::Voice
+{
+    VoiceConnection::Stats VoiceConnection::GetStats()
+    {
+        Stats s;
+        s.state = m_state;
+        s.endpoint = m_params.endpoint;
+        s.mode = L"aead_aes256_gcm_rtpsize";
+        s.ssrc = m_ssrc;
+        s.rttMs = m_rtt;
+        s.packetsSent = m_packetsSent;
+        s.packetsReceived = m_packetsReceived;
+        s.bytesSent = m_bytesSent;
+        s.bytesReceived = m_bytesReceived;
+        s.packetsLost = m_packetsLost;
+        s.transportFailures = m_transportFailures;
+        s.e2eeDecryptFailures = m_e2eeDecryptFailures;
+        s.e2eeEncryptSkipped = m_e2eeEncryptSkipped;
+        s.speaking = m_speaking;
+        {
+            std::lock_guard guard{ m_peersLock };
+            s.participants = static_cast<int>(m_connectedUsers.size()) + 1;
+        }
+        {
+            std::lock_guard guard{ m_daveLock };
+            s.daveVersion = m_daveVersion;
+            s.daveReady = m_encryptor && daveEncryptorHasKeyRatchet(m_encryptor) && !daveEncryptorIsPassthroughMode(m_encryptor);
+        }
+        return s;
     }
 }

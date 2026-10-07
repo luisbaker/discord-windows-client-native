@@ -295,6 +295,11 @@ namespace winrt::DiscordWin3::implementation
         accelerator(VirtualKey::Right, VirtualKeyModifiers::Menu, [](MainWindow* w) { w->OnNavigateForward(nullptr, nullptr); });
         NavButtons().SizeChanged([weak = get_weak()](auto&&, auto&&) { if (auto self = weak.get()) self->UpdateTitleBarRegions(); });
 
+        m_statsTimer = m_dispatcher.CreateTimer();
+        m_statsTimer.Interval(std::chrono::seconds(1));
+        m_statsTimer.Tick([weak = get_weak()](auto&&, auto&&) { if (auto self = weak.get()) self->UpdateStatsText(); });
+        CallGrid().ItemsSource(m_callItems);
+
         m_typingTimer = m_dispatcher.CreateTimer();
         m_typingTimer.Interval(std::chrono::seconds(1));
         m_typingTimer.Tick([weak = get_weak()](auto&&, auto&&)
@@ -949,9 +954,16 @@ namespace winrt::DiscordWin3::implementation
             auto guild = FindGuild(Json::Str(d, L"guild_id"));
             if (!guild)
             {
+                // DM / group call: track participants of our call only.
+                auto userId = Json::Str(d, L"user_id");
+                m_voiceFlags[userId] = { Json::Bool(d, L"self_mute") || Json::Bool(d, L"mute"), Json::Bool(d, L"self_deaf") || Json::Bool(d, L"deaf") };
+                if (!m_voiceChannel.empty() && Json::Str(d, L"channel_id") == m_voiceChannel) m_dmCallUsers.insert(userId);
+                else m_dmCallUsers.erase(userId);
+                RefreshCallParticipants();
                 return;
             }
             ParseVoiceState(*guild, d);
+            if (guild->id == m_voiceGuild) RefreshCallParticipants();
             if (guild->id == m_currentGuildId)
             {
                 RefreshChannelList();
@@ -1135,6 +1147,8 @@ namespace winrt::DiscordWin3::implementation
             return;
         }
         auto userId = Json::Str(state, L"user_id");
+        m_voiceFlags[userId] = { Json::Bool(state, L"self_mute") || Json::Bool(state, L"mute"),
+                                 Json::Bool(state, L"self_deaf") || Json::Bool(state, L"deaf") };
         auto channelId = Json::Str(state, L"channel_id");
         if (auto member = Json::Obj(state, L"member"))
         {
@@ -1543,7 +1557,8 @@ namespace winrt::DiscordWin3::implementation
         {
             if (!item.IsCategory() && !item.IsVoiceUser())
             {
-                JoinVoice(m_currentGuildId, std::wstring{ item.Id() });   // voice / stage channel: join the call
+                if (std::wstring{ item.Id() } == m_voiceChannel) ShowCallView(true);   // already in: show the call screen
+                else JoinVoice(m_currentGuildId, std::wstring{ item.Id() });         // voice / stage channel: join the call
             }
             // Keep the highlight on the channel that is actually open.
             for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
@@ -1565,6 +1580,7 @@ namespace winrt::DiscordWin3::implementation
         ChannelAvatarBorder().Visibility(Show(hasAvatar));
         ChannelAvatar().Source(hasAvatar ? item.Avatar() : nullptr);
         CallButton().Visibility(Show(m_currentGuildId == HomeId));
+        ShowCallView(false);
         ShowFriends(false);
         LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Name() });
         Composer().PlaceholderText(I18n::Fmt(m_currentGuildId == HomeId ? I18n::S::SendMessageTo : I18n::S::SendMessageIn,
@@ -4928,6 +4944,7 @@ namespace winrt::DiscordWin3::implementation
         VoiceStatusText().Text(I18n::Tr(I18n::S::VoiceConnecting));
         VoiceStatusText().Foreground(SolidBrush(0xF0B232));
         VoicePanel().Visibility(Visibility::Visible);
+        ShowCallView(true);
     }
 
     void MainWindow::LeaveVoice()
@@ -4950,6 +4967,8 @@ namespace winrt::DiscordWin3::implementation
         m_speakingUsers.clear();
         for (auto const& user : speaking) UpdateVoiceUserRow(user);
         VoicePanel().Visibility(Visibility::Collapsed);
+        ShowCallView(false);
+        m_dmCallUsers.clear();
     }
 
     void MainWindow::OnOwnVoiceState(Slim::Value const& d)
@@ -5037,6 +5056,15 @@ namespace winrt::DiscordWin3::implementation
 
     void MainWindow::UpdateVoiceUserRow(std::wstring const& userId)
     {
+        // Call screen tile (green ring).
+        for (uint32_t i = 0; i < m_callItems.Size(); ++i)
+        {
+            auto tile = get_self<implementation::ParticipantItem>(m_callItems.GetAt(i).as<DiscordWin3::ParticipantItem>());
+            if (std::wstring{ tile->UserId() } != userId) continue;
+            m_callItems.SetAt(i, make<ParticipantItem>(userId, tile->NameText(), tile->AvatarUrl(),
+                                                       m_speakingUsers.contains(userId), tile->Muted(), tile->Deaf()));
+            break;
+        }
         std::wstring id = L"voice:" + userId;
         for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
         {
@@ -5053,6 +5081,14 @@ namespace winrt::DiscordWin3::implementation
     {
         MuteIcon().Foreground(m_selfMute || m_selfDeaf ? SolidBrush(0xF23F43) : SolidBrush(0xDBDEE1));
         DeafenIcon().Foreground(m_selfDeaf ? SolidBrush(0xF23F43) : SolidBrush(0xDBDEE1));
+        CallMuteIcon().Foreground(MuteIcon().Foreground());
+        CallDeafenIcon().Foreground(DeafenIcon().Foreground());
+        ToolTipService::SetToolTip(CallMuteButton(), box_value(I18n::Tr(m_selfMute ? I18n::S::UnmuteMic : I18n::S::MuteMic)));
+        ToolTipService::SetToolTip(CallDeafenButton(), box_value(I18n::Tr(m_selfDeaf ? I18n::S::Undeafen : I18n::S::Deafen)));
+        ToolTipService::SetToolTip(CallShareButton(), box_value(I18n::Tr(I18n::S::ShareScreen)));
+        ToolTipService::SetToolTip(CallStatsButton(), box_value(I18n::Tr(I18n::S::StatsForNerds)));
+        ToolTipService::SetToolTip(CallLeaveButton(), box_value(I18n::Tr(I18n::S::VoiceDisconnect)));
+        RefreshCallParticipants();   // own mute / deaf icons
         ToolTipService::SetToolTip(MuteButton(), box_value(I18n::Tr(m_selfMute ? I18n::S::UnmuteMic : I18n::S::MuteMic)));
         ToolTipService::SetToolTip(DeafenButton(), box_value(I18n::Tr(m_selfDeaf ? I18n::S::Undeafen : I18n::S::Deafen)));
         ToolTipService::SetToolTip(VoiceDisconnectButton(), box_value(I18n::Tr(I18n::S::VoiceDisconnect)));
@@ -5093,5 +5129,138 @@ namespace winrt::DiscordWin3::implementation
             body.Insert(L"recipients", JsonValue::CreateNullValue());
             m_rest->PostJson(L"/channels/" + channel + L"/call/ring", body);
         }
+    }
+}
+
+namespace winrt::DiscordWin3::implementation
+{
+    // ------------------------------------------------------------------ call screen
+
+    void MainWindow::ShowCallView(bool show)
+    {
+        m_showingCall = show && !m_voiceChannel.empty();
+        CallView().Visibility(Show(m_showingCall));
+        if (!m_showingCall)
+        {
+            m_callItems.Clear();   // tiles hold large avatars: drop them when hidden
+            if (m_statsTimer) m_statsTimer.Stop();
+            return;
+        }
+        if (m_showingFriends) ShowFriends(false);
+        auto name = m_channelNames.find(m_voiceChannel);
+        CallTitle().Text(name != m_channelNames.end() ? name->second : std::wstring{});
+        TitleText().Text(CallTitle().Text());
+        RefreshCallParticipants();
+        if (CallStatsButton().IsChecked().Value())
+        {
+            UpdateStatsText();
+            m_statsTimer.Start();
+        }
+    }
+
+    void MainWindow::OnOpenCallView(IInspectable const&, Input::TappedRoutedEventArgs const&)
+    {
+        ShowCallView(true);
+    }
+
+    void MainWindow::RefreshCallParticipants()
+    {
+        if (!m_showingCall) return;
+
+        std::vector<std::wstring> users;
+        if (auto guild = FindGuild(m_voiceGuild))
+        {
+            for (auto const& [userId, channelId] : guild->voice)
+            {
+                if (channelId == m_voiceChannel) users.push_back(userId);
+            }
+        }
+        else
+        {
+            users.assign(m_dmCallUsers.begin(), m_dmCallUsers.end());
+        }
+        if (std::find(users.begin(), users.end(), m_selfId) == users.end()) users.insert(users.begin(), m_selfId);
+
+        auto& members = m_members[m_voiceGuild];
+        std::vector<IInspectable> tiles;
+        for (auto const& id : users)
+        {
+            auto user = m_users.find(id);
+            auto member = members.find(id);
+            std::wstring name = member != members.end() && !member->second.nick.empty() ? member->second.nick
+                : user != m_users.end() ? user->second.name : id;
+            std::wstring avatar = member != members.end() && !member->second.avatarUrl.empty() ? member->second.avatarUrl
+                : user != m_users.end() ? user->second.avatarUrl : DefaultAvatar(id, L"0");
+            auto flags = m_voiceFlags.find(id);
+            bool muted = id == m_selfId ? (m_selfMute || m_selfDeaf) : (flags != m_voiceFlags.end() && flags->second.first);
+            bool deaf = id == m_selfId ? m_selfDeaf : (flags != m_voiceFlags.end() && flags->second.second);
+            tiles.push_back(make<ParticipantItem>(id, name, avatar, m_speakingUsers.contains(id), muted, deaf));
+        }
+        m_callItems.ReplaceAll(tiles);
+    }
+
+    void MainWindow::OnToggleStats(IInspectable const&, RoutedEventArgs const&)
+    {
+        bool on = CallStatsButton().IsChecked().Value();
+        StatsPanel().Visibility(Show(on));
+        if (on)
+        {
+            UpdateStatsText();
+            m_statsTimer.Start();
+        }
+        else
+        {
+            m_statsTimer.Stop();
+        }
+    }
+
+    void MainWindow::UpdateStatsText()
+    {
+        StatsTitle().Text(I18n::Tr(I18n::S::StatsForNerds));
+        if (!m_voice)
+        {
+            StatsText().Text(L"state         : " + std::wstring{ m_voiceChannel.empty() ? L"idle" : L"waiting for voice server" } +
+                             L"\nsession       : " + (m_voiceSession.empty() ? L"-" : L"ok") +
+                             L"\nvoice server  : " + (m_voiceEndpoint.empty() ? L"-" : m_voiceEndpoint));
+            return;
+        }
+        auto s = m_voice->GetStats();
+        auto kb = [](uint64_t bytes)
+        {
+            wchar_t buf[32];
+            swprintf_s(buf, L"%.1f KB", bytes / 1024.0);
+            return std::wstring{ buf };
+        };
+        uint64_t expected = s.packetsReceived + s.packetsLost;
+        wchar_t loss[32];
+        swprintf_s(loss, L"%.2f %%", expected ? 100.0 * s.packetsLost / expected : 0.0);
+
+        PROCESS_MEMORY_COUNTERS_EX memory{ sizeof(memory) };
+        GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
+
+        using State = Voice::VoiceConnection::State;
+        std::wstring text;
+        text += L"state         : " + std::wstring{ s.state == State::Connected ? L"connected" : s.state == State::Failed ? L"failed" : L"connecting" };
+        text += L"\nendpoint      : " + s.endpoint;
+        text += L"\nping (rtt)    : " + (s.rttMs >= 0 ? std::to_wstring(s.rttMs) + L" ms" : std::wstring{ L"-" });
+        text += L"\ntransport     : " + s.mode;
+        text += L"\ne2ee (DAVE)   : " + (s.daveVersion == 0 ? std::wstring{ L"off" }
+                                        : L"v" + std::to_wstring(s.daveVersion) + (s.daveReady ? L" - keys ready" : L" - waiting for MLS keys"));
+        text += L"\ncodec         : opus 48 kHz stereo 64 kbps";
+        text += L"\nssrc          : " + std::to_wstring(s.ssrc);
+        text += L"\nparticipants  : " + std::to_wstring(s.participants);
+        text += L"\nsent          : " + std::to_wstring(s.packetsSent) + L" pkts / " + kb(s.bytesSent);
+        text += L"\nreceived      : " + std::to_wstring(s.packetsReceived) + L" pkts / " + kb(s.bytesReceived);
+        text += L"\nlost          : " + std::to_wstring(s.packetsLost) + L" (" + loss + L")";
+        text += L"\nauth failures : " + std::to_wstring(s.transportFailures);
+        text += L"\ne2ee failures : decrypt " + std::to_wstring(s.e2eeDecryptFailures) + L" / encrypt skipped " + std::to_wstring(s.e2eeEncryptSkipped);
+        text += L"\nmic           : " + std::wstring{ m_selfDeaf ? L"deafened" : m_selfMute ? L"muted" : s.speaking ? L"speaking" : L"silent" };
+        text += L"\napp memory    : " + std::to_wstring(memory.PrivateUsage >> 20) + L" MB private";
+        StatsText().Text(text);
+    }
+
+    void MainWindow::OnShareScreen(IInspectable const&, RoutedEventArgs const&)
+    {
+        StatusText().Text(I18n::Tr(I18n::S::ScreenShareSoon));
     }
 }

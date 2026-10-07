@@ -96,6 +96,16 @@ namespace DiscordWin3
         String RemoveLabel { get; };
     }
 
+    runtimeclass ParticipantItem
+    {
+        String UserId { get; };
+        String Name { get; };
+        Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
+        Microsoft.UI.Xaml.Media.Brush RingBrush { get; };
+        Microsoft.UI.Xaml.Visibility MutedVisibility { get; };
+        Microsoft.UI.Xaml.Visibility DeafVisibility { get; };
+    }
+
     runtimeclass MemberItem
     {
         Boolean IsGroup { get; };
