@@ -1,0 +1,46 @@
+namespace DiscordWin3
+{
+    // Items are immutable (bound OneTime). Updates replace the item in its collection,
+    // which avoids the cost of INotifyPropertyChanged plumbing on every row.
+
+    runtimeclass GuildItem
+    {
+        String Id { get; };
+        String Name { get; };
+        String Initials { get; };
+        Microsoft.UI.Xaml.Media.ImageSource Icon { get; };
+        Microsoft.UI.Xaml.Visibility IconVisibility { get; };
+        Microsoft.UI.Xaml.Visibility InitialsVisibility { get; };
+    }
+
+    runtimeclass ChannelItem
+    {
+        String Id { get; };
+        String Name { get; };
+        String Glyph { get; };
+        Boolean IsCategory { get; };
+        Boolean IsTextLike { get; };
+        Microsoft.UI.Xaml.Visibility CategoryVisibility { get; };
+        Microsoft.UI.Xaml.Visibility ChannelVisibility { get; };
+    }
+
+    runtimeclass MessageItem
+    {
+        String Id { get; };
+        String AuthorId { get; };
+        String AuthorName { get; };
+        String Content { get; };
+        String Timestamp { get; };
+        Int64 UnixMs { get; };
+        Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
+        Microsoft.UI.Xaml.Visibility HeaderVisibility { get; };
+        Microsoft.UI.Xaml.Thickness RowPadding { get; };
+        Microsoft.UI.Xaml.Visibility ContentVisibility { get; };
+        Microsoft.UI.Xaml.Media.ImageSource Image { get; };
+        Microsoft.UI.Xaml.Visibility ImageVisibility { get; };
+        Double ImageWidth { get; };
+        Double ImageHeight { get; };
+        String Files { get; };
+        Microsoft.UI.Xaml.Visibility FilesVisibility { get; };
+    }
+}

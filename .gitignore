@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+Generated Files/
+*.user
+*.aps
+.vs/
+
+# NuGet (restored with tools/restore.ps1)
+packages/
+tools/nuget.exe
+
+# Never commit credentials
+token.bin
+*.token
