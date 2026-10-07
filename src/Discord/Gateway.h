@@ -24,6 +24,9 @@ namespace DiscordWin3::Discord
         void Start();
         void Stop();
 
+        // Op 8: ask for member objects (nick, guild avatar, roles) -> GUILD_MEMBERS_CHUNK.
+        void RequestGuildMembers(std::wstring guildId, std::vector<std::wstring> userIds);
+
     private:
         winrt::fire_and_forget Connect(bool resume);
         void OnText(winrt::hstring const& text, uint64_t generation);

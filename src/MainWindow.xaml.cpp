@@ -33,6 +33,11 @@ namespace winrt::DiscordWin3::implementation
             return type == 0 || type == 1 || type == 3 || type == 5;
         }
 
+        bool IsVoiceLike(int type)
+        {
+            return type == 2 || type == 13;
+        }
+
         std::wstring Glyph(int type)
         {
             switch (type)
@@ -52,6 +57,14 @@ namespace winrt::DiscordWin3::implementation
             return global.empty() ? Json::Str(user, L"username") : global;
         }
 
+        std::wstring DefaultAvatar(std::wstring const& id, std::wstring const& discriminator)
+        {
+            uint64_t index = (discriminator.empty() || discriminator == L"0")
+                ? (Json::U64(id) >> 22) % 6
+                : Json::U64(discriminator) % 5;
+            return std::wstring{ Discord::CdnBase } + L"/embed/avatars/" + std::to_wstring(index) + L".png";
+        }
+
         std::wstring AvatarUrl(JsonObject const& user)
         {
             auto id = Json::Str(user, L"id");
@@ -60,14 +73,10 @@ namespace winrt::DiscordWin3::implementation
             {
                 return std::wstring{ Discord::CdnBase } + L"/avatars/" + id + L"/" + hash + L".png?size=64";
             }
-            auto discriminator = Json::Str(user, L"discriminator");
-            uint64_t index = (discriminator.empty() || discriminator == L"0")
-                ? (Json::U64(id) >> 22) % 6
-                : Json::U64(discriminator) % 5;
-            return std::wstring{ Discord::CdnBase } + L"/embed/avatars/" + std::to_wstring(index) + L".png";
+            return DefaultAvatar(id, Json::Str(user, L"discriminator"));
         }
 
-        std::wstring FormatTime(int64_t unixMs, bool dateOnly = false)
+        std::wstring FormatTime(int64_t unixMs)
         {
             // unix ms -> FILETIME (100ns since 1601) -> local SYSTEMTIME
             ULARGE_INTEGER t;
@@ -79,11 +88,7 @@ namespace winrt::DiscordWin3::implementation
             GetLocalTime(&now);
 
             wchar_t buf[64];
-            if (dateOnly)
-            {
-                swprintf_s(buf, L"%02d/%02d/%04d", local.wDay, local.wMonth, local.wYear);
-            }
-            else if (local.wYear == now.wYear && local.wMonth == now.wMonth && local.wDay == now.wDay)
+            if (local.wYear == now.wYear && local.wMonth == now.wMonth && local.wDay == now.wDay)
             {
                 swprintf_s(buf, L"Aujourd'hui à %02d:%02d", local.wHour, local.wMinute);
             }
@@ -134,6 +139,23 @@ namespace winrt::DiscordWin3::implementation
             }
             return nullptr;
         }
+
+        std::vector<uint64_t> RoleIds(JsonObject const& member)
+        {
+            std::vector<uint64_t> roles;
+            if (auto array = Json::Arr(member, L"roles"))
+            {
+                roles.reserve(array.Size());
+                for (auto const& id : array)
+                {
+                    if (id.ValueType() == JsonValueType::String)
+                    {
+                        roles.push_back(Json::U64(id.GetString()));
+                    }
+                }
+            }
+            return roles;
+        }
     }
 
     // ------------------------------------------------------------------ setup
@@ -151,15 +173,15 @@ namespace winrt::DiscordWin3::implementation
         ChannelList().ItemsSource(m_channelItems);
         MessageList().ItemsSource(m_messageItems);
 
-        // Give memory back to the OS while the window is minimized.
+        // Minimized = background mode: give memory back, lower memory & CPU priority.
         AppWindow().Changed([weak = get_weak()](Microsoft::UI::Windowing::AppWindow const& window,
                                                 Microsoft::UI::Windowing::AppWindowChangedEventArgs const&)
         {
             auto self = weak.get();
             auto presenter = window.Presenter().try_as<Microsoft::UI::Windowing::OverlappedPresenter>();
-            if (self && presenter && presenter.State() == Microsoft::UI::Windowing::OverlappedPresenterState::Minimized)
+            if (self && presenter)
             {
-                self->TrimMemory();
+                self->SetBackgroundMode(presenter.State() == Microsoft::UI::Windowing::OverlappedPresenterState::Minimized);
             }
         });
 
@@ -183,22 +205,162 @@ namespace winrt::DiscordWin3::implementation
         }
     }
 
-    void MainWindow::TrimMemory()
+    void MainWindow::SetBackgroundMode(bool background)
     {
-        ::DiscordWin3::ImageCache::Clear();
-        SetProcessWorkingSetSizeEx(GetCurrentProcess(), static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1), 0);
+        if (background == m_background)
+        {
+            return;
+        }
+        m_background = background;
+
+        // Memory priority: in background our pages are the first to be trimmed under pressure.
+        MEMORY_PRIORITY_INFORMATION memory{ background ? MEMORY_PRIORITY_LOW : MEMORY_PRIORITY_NORMAL };
+        SetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &memory, sizeof(memory));
+
+        // EcoQoS: efficiency cores / lower clocks while nobody is looking.
+        PROCESS_POWER_THROTTLING_STATE power{};
+        power.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        power.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        power.StateMask = background ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &power, sizeof(power));
+
+        if (background)
+        {
+            ::DiscordWin3::ImageCache::Clear();
+            HeapCompact(GetProcessHeap(), 0);
+            SetProcessWorkingSetSizeEx(GetCurrentProcess(), static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1), 0);
+        }
+    }
+
+    // ------------------------------------------------------------------ animations
+
+    void MainWindow::MorphGuild(UIElement const& root, bool squircle, bool animate)
+    {
+        using namespace Microsoft::UI::Composition;
+        auto element = root.try_as<FrameworkElement>();
+        if (!element)
+        {
+            return;
+        }
+        auto visual = Microsoft::UI::Xaml::Hosting::ElementCompositionPreview::GetElementVisual(root);
+        auto compositor = visual.Compositor();
+        auto geometry = element.Tag().try_as<CompositionRoundedRectangleGeometry>();
+        if (!geometry)
+        {
+            geometry = compositor.CreateRoundedRectangleGeometry();
+            geometry.Size({ 48.f, 48.f });
+            geometry.CornerRadius({ 24.f, 24.f });
+            visual.Clip(compositor.CreateGeometricClip(geometry));
+            element.Tag(geometry);
+        }
+
+        float radius = squircle ? 16.f : 24.f;
+        if (!animate)
+        {
+            geometry.CornerRadius({ radius, radius });
+            return;
+        }
+        auto animation = compositor.CreateVector2KeyFrameAnimation();
+        animation.InsertKeyFrame(1.f, { radius, radius },
+            compositor.CreateCubicBezierEasingFunction({ 0.2f, 0.f }, { 0.f, 1.f }));
+        animation.Duration(std::chrono::milliseconds(170));
+        geometry.StartAnimation(L"CornerRadius", animation);
+    }
+
+    void MainWindow::OnGuildContainerChanging(ListViewBase const&, ContainerContentChangingEventArgs const& args)
+    {
+        if (args.InRecycleQueue())
+        {
+            return;
+        }
+        auto container = args.ItemContainer();
+        auto root = container.ContentTemplateRoot().try_as<FrameworkElement>();
+        if (!root)
+        {
+            return;
+        }
+
+        bool fresh = !root.Tag();
+        MorphGuild(root, container.IsSelected(), false);
+        if (!fresh)
+        {
+            return;
+        }
+
+        // Hover: circle -> rounded square, exactly like Discord's server rail.
+        weak_ref<Primitives::SelectorItem> weakContainer{ container };
+        weak_ref<FrameworkElement> weakRoot{ root };
+        auto weakSelf = get_weak();
+        root.PointerEntered([weakSelf, weakRoot](IInspectable const&, Input::PointerRoutedEventArgs const&)
+        {
+            auto self = weakSelf.get();
+            if (auto r = weakRoot.get(); self && r) self->MorphGuild(r, true, true);
+        });
+        root.PointerExited([weakSelf, weakRoot, weakContainer](IInspectable const&, Input::PointerRoutedEventArgs const&)
+        {
+            auto self = weakSelf.get();
+            auto r = weakRoot.get();
+            auto c = weakContainer.get();
+            if (self && r && c) self->MorphGuild(r, c.IsSelected(), true);
+        });
+    }
+
+    void MainWindow::UpdateGuildMorphs()
+    {
+        for (uint32_t i = 0; i < m_guildItems.Size(); ++i)
+        {
+            auto container = GuildList().ContainerFromIndex(i).try_as<ListViewItem>();
+            if (!container)
+            {
+                continue;
+            }
+            if (auto root = container.ContentTemplateRoot())
+            {
+                MorphGuild(root, container.IsSelected(), true);
+            }
+        }
+    }
+
+    void MainWindow::AnimateMessagesIn()
+    {
+        // OpacityTransition / TranslationTransition declared in XAML do the interpolation.
+        MessageList().Opacity(1);
+        MessageList().Translation({ 0, 0, 0 });
     }
 
     // ------------------------------------------------------------------ login
 
     void MainWindow::ShowLogin(std::wstring const& error)
     {
+        ChatRoot().Opacity(0);
         ChatRoot().Visibility(Visibility::Collapsed);
         LoginRoot().Visibility(Visibility::Visible);
+        LoginRoot().Opacity(1);
         LoginError().Text(error);
         TokenLoginButton().IsEnabled(true);
         StatusText().Text(L"");
         StartQr();
+    }
+
+    void MainWindow::ShowChat()
+    {
+        ChatRoot().Visibility(Visibility::Visible);
+        ChatRoot().Opacity(1);
+        LoginRoot().Opacity(0);
+
+        // Collapse the login layer once its fade-out is done (frees its visuals).
+        [](weak_ref<MainWindow> weak) -> fire_and_forget
+        {
+            co_await resume_after(std::chrono::milliseconds(250));
+            auto self = weak.get();
+            if (!self) co_return;
+            co_await wil::resume_foreground(self->m_dispatcher);
+            if (self->LoginRoot().Opacity() == 0)
+            {
+                self->LoginRoot().Visibility(Visibility::Collapsed);
+                self->QrImage().Source(nullptr);
+            }
+        }(get_weak());
     }
 
     void MainWindow::StartQr()
@@ -207,6 +369,7 @@ namespace winrt::DiscordWin3::implementation
         {
             m_remoteAuth->Stop();
         }
+        QrImage().Opacity(0);
         QrImage().Source(nullptr);
         QrProgress().IsActive(true);
         QrRetry().Visibility(Visibility::Collapsed);
@@ -234,6 +397,7 @@ namespace winrt::DiscordWin3::implementation
             {
                 w->QrTitle().Text(L"Regarde ton téléphone !");
                 w->QrHint().Text(L"Connexion en tant que " + user + L" — confirme sur l'appli mobile.");
+                w->QrImage().Opacity(0.15);
             });
         };
         cb.onToken = [post](std::wstring const& token)
@@ -253,7 +417,7 @@ namespace winrt::DiscordWin3::implementation
                     return;
                 }
                 w->QrProgress().IsActive(false);
-                w->QrImage().Source(nullptr);
+                w->QrImage().Opacity(0);
                 w->QrTitle().Text(L"Code expiré");
                 w->QrHint().Text(message);
                 w->QrRetry().Visibility(Visibility::Visible);
@@ -300,6 +464,7 @@ namespace winrt::DiscordWin3::implementation
         co_await source.SetBitmapAsync(bitmap);
         QrProgress().IsActive(false);
         QrImage().Source(source);
+        QrImage().Opacity(1);
     }
 
     void MainWindow::OnQrRetry(IInspectable const&, RoutedEventArgs const&)
@@ -349,8 +514,7 @@ namespace winrt::DiscordWin3::implementation
 
         m_token = std::move(token);
         m_rest = std::make_shared<Discord::Rest>(m_token);
-        LoginRoot().Visibility(Visibility::Collapsed);
-        ChatRoot().Visibility(Visibility::Visible);
+        ShowChat();
         GuildTitle().Text(L"Chargement…");
 
         auto weak = get_weak();
@@ -391,7 +555,9 @@ namespace winrt::DiscordWin3::implementation
         m_token.clear();
         m_guilds.clear();
         m_dms.clear();
-        m_userNames.clear();
+        m_users.clear();
+        m_members.clear();
+        m_requestedMembers.clear();
         m_channelNames.clear();
         m_roleNames.clear();
         m_currentGuildId.clear();
@@ -401,6 +567,8 @@ namespace winrt::DiscordWin3::implementation
         m_channelItems.Clear();
         m_messageItems.Clear();
         ChannelTitle().Text(L"");
+        SelfName().Text(L"");
+        SelfAvatar().Source(nullptr);
         Composer().IsEnabled(false);
         ::DiscordWin3::ImageCache::Clear();
     }
@@ -468,6 +636,32 @@ namespace winrt::DiscordWin3::implementation
                 FixHeaderAt(index);
             }
         }
+        else if (type == L"GUILD_MEMBERS_CHUNK")
+        {
+            OnMembersChunk(d);
+        }
+        else if (type == L"GUILD_MEMBER_UPDATE")
+        {
+            if (auto guild = FindGuild(Json::Str(d, L"guild_id")))
+            {
+                CacheMember(*guild, d);
+            }
+        }
+        else if (type == L"VOICE_STATE_UPDATE")
+        {
+            auto guild = FindGuild(Json::Str(d, L"guild_id"));
+            if (!guild)
+            {
+                return;
+            }
+            JsonArray single;
+            single.Append(d);
+            ParseVoiceStates(*guild, single);
+            if (guild->id == m_currentGuildId)
+            {
+                RefreshChannelList();
+            }
+        }
         else if (type == L"GUILD_CREATE")
         {
             UpsertGuild(ParseGuild(d));
@@ -481,6 +675,7 @@ namespace winrt::DiscordWin3::implementation
             }
             auto id = Json::Str(d, L"id");
             std::erase_if(m_guilds, [&](GuildInfo const& g) { return g.id == id; });
+            m_members.erase(id);
             RefreshGuildRail();
         }
         else if (type == L"CHANNEL_CREATE" || type == L"CHANNEL_UPDATE" || type == L"CHANNEL_DELETE")
@@ -490,7 +685,7 @@ namespace winrt::DiscordWin3::implementation
             std::vector<ChannelInfo>* list = nullptr;
             if (guildId.empty())
             {
-                channel.name = DmName(d);
+                ParseDmChannel(d, channel);
                 list = &m_dms;
             }
             else if (auto guild = FindGuild(guildId))
@@ -516,6 +711,50 @@ namespace winrt::DiscordWin3::implementation
 
     // ------------------------------------------------------------------ model
 
+    UserInfo const& MainWindow::CacheUser(JsonObject const& user)
+    {
+        auto& info = m_users[Json::Str(user, L"id")];
+        info.name = UserDisplayName(user);
+        info.avatarUrl = AvatarUrl(user);
+        return info;
+    }
+
+    void MainWindow::CacheMember(GuildInfo const& guild, JsonObject const& member)
+    {
+        auto user = Json::Obj(member, L"user");
+        auto userId = user ? Json::Str(user, L"id") : Json::Str(member, L"user_id");
+        if (userId.empty())
+        {
+            return;
+        }
+        if (user)
+        {
+            CacheUser(user);
+        }
+
+        GuildMember info;
+        info.nick = Json::Str(member, L"nick");
+        auto avatar = Json::Str(member, L"avatar");
+        if (!avatar.empty())
+        {
+            info.avatarUrl = std::wstring{ Discord::CdnBase } + L"/guilds/" + guild.id + L"/users/" + userId
+                + L"/avatars/" + avatar + L".png?size=64";
+        }
+
+        // Name color = color of the highest positioned colored role.
+        int best = -1;
+        for (auto roleId : RoleIds(member))
+        {
+            auto it = guild.roles.find(roleId);
+            if (it != guild.roles.end() && it->second.color != 0 && it->second.position > best)
+            {
+                best = it->second.position;
+                info.color = it->second.color;
+            }
+        }
+        m_members[guild.id][userId] = std::move(info);
+    }
+
     ChannelInfo MainWindow::ParseChannel(JsonObject const& c)
     {
         ChannelInfo info;
@@ -529,31 +768,23 @@ namespace winrt::DiscordWin3::implementation
         return info;
     }
 
-    std::wstring MainWindow::DmName(JsonObject const& c)
+    void MainWindow::ParseDmChannel(JsonObject const& c, ChannelInfo& info)
     {
-        auto name = Json::Str(c, L"name");
-        if (!name.empty())
-        {
-            return name;
-        }
         std::wstring joined;
-        auto append = [&](std::wstring const& n)
+        std::wstring firstAvatar;
+        auto append = [&](UserInfo const& u)
         {
-            if (!n.empty())
-            {
-                joined += (joined.empty() ? L"" : L", ") + n;
-            }
+            joined += (joined.empty() ? L"" : L", ") + u.name;
+            if (firstAvatar.empty()) firstAvatar = u.avatarUrl;
         };
+
         if (auto recipients = Json::Arr(c, L"recipients"))
         {
             for (auto const& r : recipients)
             {
                 if (r.ValueType() == JsonValueType::Object)
                 {
-                    auto user = r.GetObject();
-                    auto display = UserDisplayName(user);
-                    m_userNames[Json::Str(user, L"id")] = display;
-                    append(display);
+                    append(CacheUser(r.GetObject()));
                 }
             }
         }
@@ -561,14 +792,52 @@ namespace winrt::DiscordWin3::implementation
         {
             for (auto const& r : ids)
             {
-                if (r.ValueType() == JsonValueType::String)
-                {
-                    auto it = m_userNames.find(std::wstring{ r.GetString() });
-                    append(it != m_userNames.end() ? it->second : L"?");
-                }
+                if (r.ValueType() != JsonValueType::String) continue;
+                auto it = m_users.find(std::wstring{ r.GetString() });
+                if (it != m_users.end()) append(it->second);
             }
         }
-        return joined.empty() ? L"Groupe sans nom" : joined;
+
+        auto name = Json::Str(c, L"name");
+        info.name = !name.empty() ? name : (joined.empty() ? L"Groupe sans nom" : joined);
+
+        auto icon = Json::Str(c, L"icon");
+        if (info.type == 3)
+        {
+            info.avatarUrl = icon.empty() ? L""
+                : std::wstring{ Discord::CdnBase } + L"/channel-icons/" + info.id + L"/" + icon + L".png?size=64";
+        }
+        else
+        {
+            info.avatarUrl = firstAvatar;
+        }
+    }
+
+    void MainWindow::ParseVoiceStates(GuildInfo& guild, JsonArray const& states)
+    {
+        if (!states)
+        {
+            return;
+        }
+        for (auto const& s : states)
+        {
+            if (s.ValueType() != JsonValueType::Object) continue;
+            auto state = s.GetObject();
+            auto userId = Json::Str(state, L"user_id");
+            auto channelId = Json::Str(state, L"channel_id");
+            if (auto member = Json::Obj(state, L"member"))
+            {
+                CacheMember(guild, member);
+            }
+            if (channelId.empty())
+            {
+                guild.voice.erase(userId);
+            }
+            else
+            {
+                guild.voice[userId] = channelId;
+            }
+        }
     }
 
     GuildInfo MainWindow::ParseGuild(JsonObject const& g)
@@ -593,7 +862,10 @@ namespace winrt::DiscordWin3::implementation
                 if (r.ValueType() != JsonValueType::Object) continue;
                 auto role = r.GetObject();
                 auto roleId = Json::Str(role, L"id");
-                guild.perms.rolePermissions[Json::U64(roleId)] = Json::U64(role, L"permissions");
+                auto id = Json::U64(roleId);
+                guild.perms.rolePermissions[id] = Json::U64(role, L"permissions");
+                guild.roles[id] = { static_cast<int>(Json::Num(role, L"position")),
+                                    static_cast<uint32_t>(Json::Num(role, L"color")) };
                 m_roleNames[roleId] = Json::Str(role, L"name");
             }
         }
@@ -604,19 +876,13 @@ namespace winrt::DiscordWin3::implementation
             {
                 if (m.ValueType() != JsonValueType::Object) continue;
                 auto member = m.GetObject();
+                CacheMember(guild, member);
                 auto user = Json::Obj(member, L"user");
                 auto userId = user ? Json::Str(user, L"id") : Json::Str(member, L"user_id");
                 if (userId == m_selfId)
                 {
                     guild.perms.known = true;
-                    if (auto roles = Json::Arr(member, L"roles"))
-                    {
-                        for (auto const& id : roles)
-                        {
-                            if (id.ValueType() == JsonValueType::String)
-                                guild.perms.selfRoles.push_back(Json::U64(id.GetString()));
-                        }
-                    }
+                    guild.perms.selfRoles = RoleIds(member);
                 }
             }
         }
@@ -632,6 +898,8 @@ namespace winrt::DiscordWin3::implementation
                 guild.channels.push_back(std::move(info));
             }
         }
+
+        ParseVoiceStates(guild, Json::Arr(g, L"voice_states"));
         return guild;
     }
 
@@ -645,7 +913,9 @@ namespace winrt::DiscordWin3::implementation
 
         auto user = Json::Obj(d, L"user");
         m_selfId = Json::Str(user, L"id");
-        SelfName().Text(UserDisplayName(user));
+        auto const& self = CacheUser(user);
+        SelfName().Text(self.name);
+        SelfAvatar().Source(::DiscordWin3::ImageCache::Get(self.avatarUrl, 32));
 
         if (auto users = Json::Arr(d, L"users"))
         {
@@ -653,8 +923,7 @@ namespace winrt::DiscordWin3::implementation
             {
                 if (u.ValueType() == JsonValueType::Object)
                 {
-                    auto o = u.GetObject();
-                    m_userNames[Json::Str(o, L"id")] = UserDisplayName(o);
+                    CacheUser(u.GetObject());
                 }
             }
         }
@@ -670,22 +939,18 @@ namespace winrt::DiscordWin3::implementation
                 auto guild = ParseGuild(value.GetObject());
 
                 // merged_members[i] holds our own member object for guilds[i].
-                if (!guild.perms.known && mergedMembers && i < mergedMembers.Size()
+                if (mergedMembers && i < mergedMembers.Size()
                     && mergedMembers.GetAt(i).ValueType() == JsonValueType::Array)
                 {
                     for (auto const& m : mergedMembers.GetAt(i).GetArray())
                     {
                         if (m.ValueType() != JsonValueType::Object) continue;
                         auto member = m.GetObject();
-                        if (Json::Str(member, L"user_id") != m_selfId) continue;
-                        guild.perms.known = true;
-                        if (auto roles = Json::Arr(member, L"roles"))
+                        CacheMember(guild, member);
+                        if (Json::Str(member, L"user_id") == m_selfId && !guild.perms.known)
                         {
-                            for (auto const& id : roles)
-                            {
-                                if (id.ValueType() == JsonValueType::String)
-                                    guild.perms.selfRoles.push_back(Json::U64(id.GetString()));
-                            }
+                            guild.perms.known = true;
+                            guild.perms.selfRoles = RoleIds(member);
                         }
                     }
                 }
@@ -734,7 +999,7 @@ namespace winrt::DiscordWin3::implementation
                 if (c.ValueType() != JsonValueType::Object) continue;
                 auto o = c.GetObject();
                 auto info = ParseChannel(o);
-                info.name = DmName(o);
+                ParseDmChannel(o, info);
                 m_channelNames[info.id] = info.name;
                 m_dms.push_back(std::move(info));
             }
@@ -808,14 +1073,17 @@ namespace winrt::DiscordWin3::implementation
         if (m_currentGuildId == HomeId)
         {
             GuildTitle().Text(L"Messages privés");
-            auto dms = m_dms;
-            std::sort(dms.begin(), dms.end(), [](ChannelInfo const& a, ChannelInfo const& b)
+            std::vector<ChannelInfo const*> dms;
+            dms.reserve(m_dms.size());
+            for (auto const& c : m_dms) dms.push_back(&c);
+            std::sort(dms.begin(), dms.end(), [](ChannelInfo const* a, ChannelInfo const* b)
             {
-                return Json::SnowflakeLess(b.lastMessageId, a.lastMessageId);
+                return Json::SnowflakeLess(b->lastMessageId, a->lastMessageId);
             });
-            for (auto const& c : dms)
+            for (auto c : dms)
             {
-                items.push_back(make<ChannelItem>(hstring{ c.id }, hstring{ c.name }, hstring{ Glyph(c.type) }, false, true));
+                items.push_back(make<ChannelItem>(hstring{ c->id }, hstring{ c->name }, hstring{ Glyph(c->type) },
+                                                  ChannelKind::Text, c->avatarUrl));
             }
         }
         else if (auto guild = FindGuild(m_currentGuildId))
@@ -830,6 +1098,23 @@ namespace winrt::DiscordWin3::implementation
                 return Json::SnowflakeLess(a->id, b->id);
             };
 
+            // Voice participants grouped by channel.
+            std::unordered_map<std::wstring, std::vector<std::wstring>> voiceUsers;
+            std::vector<std::wstring> unknown;
+            auto& members = m_members[guild->id];
+            for (auto const& [userId, channelId] : guild->voice)
+            {
+                voiceUsers[channelId].push_back(userId);
+                if (!m_users.contains(userId) && m_requestedMembers.insert(guild->id + L":" + userId).second)
+                {
+                    unknown.push_back(userId);
+                }
+            }
+            if (!unknown.empty() && m_gateway)
+            {
+                m_gateway->RequestGuildMembers(guild->id, unknown);
+            }
+
             std::vector<ChannelInfo const*> categories;
             std::unordered_map<std::wstring, std::vector<ChannelInfo const*>> children;
             for (auto const& c : guild->channels)
@@ -838,7 +1123,7 @@ namespace winrt::DiscordWin3::implementation
                 {
                     categories.push_back(&c);
                 }
-                else if ((IsTextLike(c.type) || c.type == 2 || c.type == 13 || c.type == 15) && guild->perms.CanView(c.overwrites))
+                else if ((IsTextLike(c.type) || IsVoiceLike(c.type) || c.type == 15) && guild->perms.CanView(c.overwrites))
                 {
                     children[c.parentId].push_back(&c);
                 }
@@ -850,7 +1135,21 @@ namespace winrt::DiscordWin3::implementation
                 std::sort(list.begin(), list.end(), byPosition);
                 for (auto c : list)
                 {
-                    items.push_back(make<ChannelItem>(hstring{ c->id }, hstring{ c->name }, hstring{ Glyph(c->type) }, false, IsTextLike(c->type)));
+                    items.push_back(make<ChannelItem>(hstring{ c->id }, hstring{ c->name }, hstring{ Glyph(c->type) },
+                                                      IsTextLike(c->type) ? ChannelKind::Text : ChannelKind::Voice));
+                    auto it = voiceUsers.find(c->id);
+                    if (it == voiceUsers.end()) continue;
+                    for (auto const& userId : it->second)
+                    {
+                        auto user = m_users.find(userId);
+                        auto member = members.find(userId);
+                        std::wstring name = member != members.end() && !member->second.nick.empty() ? member->second.nick
+                            : user != m_users.end() ? user->second.name : L"…";
+                        std::wstring avatar = member != members.end() && !member->second.avatarUrl.empty() ? member->second.avatarUrl
+                            : user != m_users.end() ? user->second.avatarUrl : DefaultAvatar(userId, L"0");
+                        items.push_back(make<ChannelItem>(hstring{ L"voice:" + userId }, hstring{ name }, L"",
+                                                          ChannelKind::VoiceUser, avatar));
+                    }
                 }
             };
 
@@ -859,7 +1158,8 @@ namespace winrt::DiscordWin3::implementation
             {
                 auto& list = children[category->id];
                 if (list.empty()) continue;
-                items.push_back(make<ChannelItem>(hstring{ category->id }, hstring{ Upper(category->name) }, L"", true, false));
+                items.push_back(make<ChannelItem>(hstring{ category->id }, hstring{ Upper(category->name) }, L"",
+                                                  ChannelKind::Category));
                 emit(list);
             }
         }
@@ -877,6 +1177,7 @@ namespace winrt::DiscordWin3::implementation
 
     void MainWindow::OnGuildSelected(IInspectable const&, SelectionChangedEventArgs const&)
     {
+        UpdateGuildMorphs();
         auto item = GuildList().SelectedItem().try_as<DiscordWin3::GuildItem>();
         if (!item || item.Id() == m_currentGuildId)
         {
@@ -900,11 +1201,126 @@ namespace winrt::DiscordWin3::implementation
     void MainWindow::OnChannelSelected(IInspectable const&, SelectionChangedEventArgs const&)
     {
         auto item = ChannelList().SelectedItem().try_as<DiscordWin3::ChannelItem>();
-        if (!item || !item.IsTextLike() || item.Id() == m_currentChannelId)
+        if (!item || item.Id() == m_currentChannelId)
         {
             return;
         }
+        if (!item.IsTextLike())
+        {
+            if (!item.IsCategory() && !item.IsVoiceUser())
+            {
+                StatusText().Text(L"Les appels vocaux arrivent dans une prochaine version.");
+            }
+            // Keep the highlight on the channel that is actually open.
+            for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
+            {
+                if (m_channelItems.GetAt(i).as<DiscordWin3::ChannelItem>().Id() == m_currentChannelId)
+                {
+                    ChannelList().SelectedIndex(static_cast<int>(i));
+                    return;
+                }
+            }
+            ChannelList().SelectedIndex(-1);
+            return;
+        }
         LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Glyph() } + L" " + std::wstring{ item.Name() });
+    }
+
+    // ------------------------------------------------------------------ members
+
+    void MainWindow::ApplyMember(MessageData& data)
+    {
+        if (m_currentGuildId.empty() || m_currentGuildId == HomeId)
+        {
+            return;
+        }
+        auto guild = m_members.find(m_currentGuildId);
+        if (guild == m_members.end())
+        {
+            return;
+        }
+        auto member = guild->second.find(data.authorId);
+        if (member == guild->second.end())
+        {
+            return;
+        }
+        if (!member->second.nick.empty()) data.authorName = member->second.nick;
+        if (!member->second.avatarUrl.empty()) data.avatarUrl = member->second.avatarUrl;
+        data.color = member->second.color;
+    }
+
+    void MainWindow::RequestMissingMembers()
+    {
+        if (!m_gateway || m_currentGuildId.empty() || m_currentGuildId == HomeId)
+        {
+            return;
+        }
+        auto& known = m_members[m_currentGuildId];
+        std::vector<std::wstring> missing;
+        for (uint32_t i = 0; i < m_messageItems.Size(); ++i)
+        {
+            auto const& id = Impl(m_messageItems.GetAt(i))->Data().authorId;
+            if (id.empty() || known.contains(id))
+            {
+                continue;
+            }
+            if (m_requestedMembers.insert(m_currentGuildId + L":" + id).second)
+            {
+                missing.push_back(id);
+            }
+        }
+        if (!missing.empty())
+        {
+            m_gateway->RequestGuildMembers(m_currentGuildId, std::move(missing));
+        }
+    }
+
+    void MainWindow::OnMembersChunk(JsonObject const& d)
+    {
+        auto guild = FindGuild(Json::Str(d, L"guild_id"));
+        auto members = Json::Arr(d, L"members");
+        if (!guild || !members)
+        {
+            return;
+        }
+
+        std::unordered_set<std::wstring> updated;
+        for (auto const& m : members)
+        {
+            if (m.ValueType() != JsonValueType::Object) continue;
+            auto member = m.GetObject();
+            CacheMember(*guild, member);
+            if (auto user = Json::Obj(member, L"user"))
+            {
+                updated.insert(Json::Str(user, L"id"));
+            }
+        }
+        if (guild->id != m_currentGuildId || updated.empty())
+        {
+            return;
+        }
+
+        // Re-skin the rows of those authors with their nick / guild avatar / role color.
+        for (uint32_t i = 0; i < m_messageItems.Size(); ++i)
+        {
+            auto item = Impl(m_messageItems.GetAt(i));
+            if (!updated.contains(item->Data().authorId))
+            {
+                continue;
+            }
+            MessageData data = item->Data();
+            ApplyMember(data);
+            if (data.authorName != item->Data().authorName || data.avatarUrl != item->Data().avatarUrl || data.color != item->Data().color)
+            {
+                m_messageItems.SetAt(i, make<MessageItem>(std::move(data), item->ShowsHeader()));
+            }
+        }
+
+        bool voiceTouched = std::any_of(updated.begin(), updated.end(), [&](auto const& id) { return guild->voice.contains(id); });
+        if (voiceTouched)
+        {
+            RefreshChannelList();
+        }
     }
 
     // ------------------------------------------------------------------ messages
@@ -915,12 +1331,17 @@ namespace winrt::DiscordWin3::implementation
         auto generation = ++m_channelGeneration;
         auto rest = m_rest;
         m_currentChannelId = id;
-        m_messageItems.Clear();
         m_hasMoreOlder = false;
         m_loadingOlder = false;
         ChannelTitle().Text(title);
         Composer().IsEnabled(true);
         Composer().PlaceholderText(L"Envoyer un message dans " + title);
+        StatusText().Text(L"");
+
+        // Fade/slide the old content out while the new one loads.
+        MessageList().Opacity(0);
+        MessageList().Translation({ 0, 16, 0 });
+        m_messageItems.Clear();
         if (!rest)
         {
             co_return;
@@ -941,11 +1362,13 @@ namespace winrt::DiscordWin3::implementation
                 AppendMessage(BuildMessage(array.GetAt(i).GetObject()));
             }
             m_hasMoreOlder = array.Size() == 50;
+            RequestMissingMembers();
         }
         catch (hresult_error const& e)
         {
             error = e.message();
         }
+
         if (!error.empty())
         {
             co_await wil::resume_foreground(m_dispatcher);
@@ -959,6 +1382,7 @@ namespace winrt::DiscordWin3::implementation
             info.content = message.starts_with(L"HTTP 403") ? L"Tu n'as pas accès à ce salon." : L"Erreur de chargement : " + message;
             AppendMessage(std::move(info));
         }
+        AnimateMessagesIn();
     }
 
     fire_and_forget MainWindow::LoadOlder()
@@ -997,6 +1421,7 @@ namespace winrt::DiscordWin3::implementation
                 m_messageItems.InsertAt(0, make<MessageItem>(batch[i], header));
             }
             FixHeaderAt(static_cast<uint32_t>(batch.size()));
+            RequestMissingMembers();
         }
         catch (...)
         {
@@ -1110,25 +1535,28 @@ namespace winrt::DiscordWin3::implementation
             }
             std::wstring_view tag{ raw.data() + i + 1, close - i - 1 };
             std::wstring replacement;
-            auto lookup = [](auto const& map, std::wstring const& key, std::wstring fallback)
-            {
-                auto it = map.find(key);
-                return it != map.end() ? it->second : fallback;
-            };
 
             if (tag.starts_with(L"@&"))
             {
-                replacement = L"@" + lookup(m_roleNames, std::wstring{ tag.substr(2) }, L"rôle");
+                auto it = m_roleNames.find(std::wstring{ tag.substr(2) });
+                replacement = L"@" + (it != m_roleNames.end() ? it->second : std::wstring{ L"rôle" });
             }
             else if (tag.starts_with(L"@"))
             {
                 auto id = std::wstring{ tag.substr(tag.starts_with(L"@!") ? 2 : 1) };
-                auto name = lookup(mentions, id, L"");
-                replacement = L"@" + (name.empty() ? lookup(m_userNames, id, L"utilisateur") : name);
+                std::wstring name;
+                if (auto g = m_members.find(m_currentGuildId); g != m_members.end())
+                {
+                    if (auto mem = g->second.find(id); mem != g->second.end()) name = mem->second.nick;
+                }
+                if (name.empty()) if (auto it = mentions.find(id); it != mentions.end()) name = it->second;
+                if (name.empty()) if (auto it = m_users.find(id); it != m_users.end()) name = it->second.name;
+                replacement = L"@" + (name.empty() ? std::wstring{ L"utilisateur" } : name);
             }
             else if (tag.starts_with(L"#"))
             {
-                replacement = L"#" + lookup(m_channelNames, std::wstring{ tag.substr(1) }, L"salon-inconnu");
+                auto it = m_channelNames.find(std::wstring{ tag.substr(1) });
+                replacement = L"#" + (it != m_channelNames.end() ? it->second : std::wstring{ L"salon-inconnu" });
             }
             else if (tag.starts_with(L":") || tag.starts_with(L"a:"))
             {
@@ -1138,13 +1566,17 @@ namespace winrt::DiscordWin3::implementation
             }
             else if (tag.starts_with(L"t:"))
             {
-                auto digits = tag.substr(2, tag.find(L':', 2) == std::wstring_view::npos ? std::wstring_view::npos : tag.find(L':', 2) - 2);
-                replacement = FormatTime(static_cast<int64_t>(Json::U64(digits)) * 1000);
+                auto rest = tag.substr(2);
+                auto colon = rest.find(L':');
+                replacement = FormatTime(static_cast<int64_t>(Json::U64(rest.substr(0, colon))) * 1000);
+            }
+            else if (tag.starts_with(L"http"))
+            {
+                replacement = std::wstring{ tag };
             }
             else
             {
-                replacement = L"<" + std::wstring{ tag } + L">"; // plain link like <https://...>
-                if (tag.starts_with(L"http")) replacement = std::wstring{ tag };
+                replacement = L"<" + std::wstring{ tag } + L">";
             }
             out += replacement;
             i = close + 1;
@@ -1161,10 +1593,28 @@ namespace winrt::DiscordWin3::implementation
 
         auto author = Json::Obj(m, L"author");
         data.authorId = Json::Str(author, L"id");
-        auto member = Json::Obj(m, L"member");
-        auto nick = Json::Str(member, L"nick");
-        data.authorName = nick.empty() ? UserDisplayName(author) : nick;
-        data.avatarUrl = AvatarUrl(author);
+        if (!Json::Str(m, L"webhook_id").empty())
+        {
+            data.authorName = UserDisplayName(author);
+            data.avatarUrl = AvatarUrl(author);
+        }
+        else
+        {
+            auto const& user = CacheUser(author);
+            data.authorName = user.name;
+            data.avatarUrl = user.avatarUrl;
+
+            // MESSAGE_CREATE carries the member object: free nick/roles, cache them.
+            if (auto member = Json::Obj(m, L"member"))
+            {
+                if (auto guild = FindGuild(Json::Str(m, L"guild_id")))
+                {
+                    member.Insert(L"user", author);
+                    CacheMember(*guild, member);
+                }
+            }
+            ApplyMember(data);
+        }
 
         std::wstring content = FormatContent(Json::Str(m, L"content"), m);
 

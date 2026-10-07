@@ -62,6 +62,34 @@ namespace DiscordWin3::Discord
         Teardown();
     }
 
+    void Gateway::RequestGuildMembers(std::wstring guildId, std::vector<std::wstring> userIds)
+    {
+        // Sending blocks on the socket, so never do it on the UI thread.
+        [](std::weak_ptr<Gateway> weak, std::wstring guildId, std::vector<std::wstring> userIds) -> fire_and_forget
+        {
+            co_await resume_background();
+            auto strong = weak.lock();
+            if (!strong)
+            {
+                co_return;
+            }
+            for (size_t start = 0; start < userIds.size(); start += 100)
+            {
+                JsonArray ids;
+                for (size_t i = start; i < std::min(start + 100, userIds.size()); ++i)
+                {
+                    ids.Append(JsonValue::CreateStringValue(userIds[i]));
+                }
+                JsonObject d;
+                d.Insert(L"guild_id", JsonValue::CreateStringValue(guildId));
+                d.Insert(L"user_ids", ids);
+                d.Insert(L"presences", JsonValue::CreateBooleanValue(false));
+                std::lock_guard guard{ strong->m_lock };
+                strong->Send(Payload(8, d));
+            }
+        }(weak_from_this(), std::move(guildId), std::move(userIds));
+    }
+
     void Gateway::Teardown()
     {
         ++m_generation;

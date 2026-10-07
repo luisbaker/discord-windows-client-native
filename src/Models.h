@@ -20,6 +20,7 @@ namespace DiscordWin3
         double imageWidth = 0;
         double imageHeight = 0;
         std::wstring files;       // other attachments, one per line
+        uint32_t color = 0;       // top role color (0xRRGGBB), 0 = default
         bool forceHeader = false; // replies / system messages never collapse into the previous group
     };
 }
@@ -44,22 +45,37 @@ namespace winrt::DiscordWin3::implementation
         hstring m_id, m_name, m_initials, m_iconUrl;
     };
 
+    enum class ChannelKind
+    {
+        Text,       // opens in the chat
+        Category,
+        Voice,      // voice / stage / forum: not readable as text
+        VoiceUser,  // someone connected to the voice channel above
+    };
+
     struct ChannelItem : ChannelItemT<ChannelItem>
     {
-        ChannelItem(hstring id, hstring name, hstring glyph, bool isCategory, bool isTextLike)
-            : m_id(id), m_name(name), m_glyph(glyph), m_isCategory(isCategory), m_isTextLike(isTextLike) {}
+        ChannelItem(hstring id, hstring name, hstring glyph, ChannelKind kind, std::wstring avatarUrl = {})
+            : m_id(id), m_name(name), m_glyph(glyph), m_kind(kind), m_avatarUrl(std::move(avatarUrl)) {}
 
         hstring Id() const { return m_id; }
         hstring Name() const { return m_name; }
         hstring Glyph() const { return m_glyph; }
-        bool IsCategory() const { return m_isCategory; }
-        bool IsTextLike() const { return m_isTextLike; }
-        Visibility CategoryVisibility() const { return m_isCategory ? Visibility::Visible : Visibility::Collapsed; }
-        Visibility ChannelVisibility() const { return m_isCategory ? Visibility::Collapsed : Visibility::Visible; }
+        bool IsCategory() const { return m_kind == ChannelKind::Category; }
+        bool IsTextLike() const { return m_kind == ChannelKind::Text; }
+        bool IsVoiceUser() const { return m_kind == ChannelKind::VoiceUser; }
+        ImageSource Avatar();
+        Visibility AvatarVisibility() const { return m_avatarUrl.empty() ? Visibility::Collapsed : Visibility::Visible; }
+        Visibility GlyphVisibility() const { return m_avatarUrl.empty() ? Visibility::Visible : Visibility::Collapsed; }
+        Microsoft::UI::Xaml::Thickness ItemMargin() const { return { IsVoiceUser() ? 24.0 : 0.0, 0, 0, 0 }; }
+        double TextOpacity() const { return IsVoiceUser() ? 0.8 : 1.0; }
+        Visibility CategoryVisibility() const { return IsCategory() ? Visibility::Visible : Visibility::Collapsed; }
+        Visibility ChannelVisibility() const { return IsCategory() ? Visibility::Collapsed : Visibility::Visible; }
 
     private:
         hstring m_id, m_name, m_glyph;
-        bool m_isCategory, m_isTextLike;
+        ChannelKind m_kind;
+        std::wstring m_avatarUrl;
     };
 
     struct MessageItem : MessageItemT<MessageItem>
@@ -70,6 +86,7 @@ namespace winrt::DiscordWin3::implementation
         hstring Id() const { return hstring{ m_d.id }; }
         hstring AuthorId() const { return hstring{ m_d.authorId }; }
         hstring AuthorName() const { return hstring{ m_d.authorName }; }
+        Microsoft::UI::Xaml::Media::Brush AuthorBrush();
         hstring Content() const { return hstring{ m_d.content }; }
         hstring Timestamp() const { return hstring{ m_d.timestamp }; }
         int64_t UnixMs() const { return m_d.unixMs; }

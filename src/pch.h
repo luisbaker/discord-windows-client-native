@@ -42,6 +42,8 @@
 #include <winrt/Microsoft.UI.Xaml.Navigation.h>
 #include <winrt/Microsoft.UI.Xaml.Documents.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
+#include <winrt/Microsoft.UI.Xaml.Hosting.h>
+#include <winrt/Windows.Foundation.Numerics.h>
 
 #include <wil/cppwinrt_helpers.h>
 

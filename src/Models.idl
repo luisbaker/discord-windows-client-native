@@ -20,6 +20,12 @@ namespace DiscordWin3
         String Glyph { get; };
         Boolean IsCategory { get; };
         Boolean IsTextLike { get; };
+        Boolean IsVoiceUser { get; };
+        Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
+        Microsoft.UI.Xaml.Visibility AvatarVisibility { get; };
+        Microsoft.UI.Xaml.Visibility GlyphVisibility { get; };
+        Microsoft.UI.Xaml.Thickness ItemMargin { get; };
+        Double TextOpacity { get; };
         Microsoft.UI.Xaml.Visibility CategoryVisibility { get; };
         Microsoft.UI.Xaml.Visibility ChannelVisibility { get; };
     }
@@ -29,6 +35,7 @@ namespace DiscordWin3
         String Id { get; };
         String AuthorId { get; };
         String AuthorName { get; };
+        Microsoft.UI.Xaml.Media.Brush AuthorBrush { get; };
         String Content { get; };
         String Timestamp { get; };
         Int64 UnixMs { get; };
