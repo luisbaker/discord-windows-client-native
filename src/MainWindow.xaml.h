@@ -267,6 +267,7 @@ namespace winrt::DiscordWin3::implementation
         std::wstring m_replyToId;
         std::wstring m_editingId;
         bool m_windowActive = true;
+        uint64_t m_idleGeneration = 0;
         bool m_notificationsReady = false;
         std::wstring m_pendingOpenGuild, m_pendingOpenChannel;
         Microsoft::UI::Xaml::Controls::MenuFlyout m_messageMenu{ nullptr };

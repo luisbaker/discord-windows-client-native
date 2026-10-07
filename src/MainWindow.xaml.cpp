@@ -8,6 +8,7 @@
 #include "ImageCache.h"
 #include "TokenStore.h"
 #include "Strings.h"
+#include "MemLog.h"
 #include "third_party/qrcodegen.hpp"
 
 #include <algorithm>
@@ -240,6 +241,7 @@ namespace winrt::DiscordWin3::implementation
 
     void MainWindow::InitializeComponent()
     {
+        ::DiscordWin3::MemLog(L"startup");
         MainWindowT::InitializeComponent();
         I18n::Initialize();
         ApplyTexts();
@@ -304,6 +306,22 @@ namespace winrt::DiscordWin3::implementation
             auto self = weak.get();
             if (!self) return;
             self->m_windowActive = e.WindowActivationState() != WindowActivationState::Deactivated;
+            if (!self->m_windowActive)
+            {
+                // 30 s in the background without coming back: give the working set back to Windows.
+                auto generation = ++self->m_idleGeneration;
+                [](weak_ref<MainWindow> weak, uint64_t generation) -> fire_and_forget
+                {
+                    co_await resume_after(std::chrono::seconds(30));
+                    auto w = weak.get();
+                    if (!w) co_return;
+                    co_await wil::resume_foreground(w->m_dispatcher);
+                    if (w->m_windowActive || w->m_idleGeneration != generation) co_return;
+                    HeapCompact(GetProcessHeap(), 0);
+                    SetProcessWorkingSetSizeEx(GetCurrentProcess(), static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1), 0);
+                    ::DiscordWin3::MemLog(L"idle trim");
+                }(self->get_weak(), generation);
+            }
             // Coming back to the window = the open channel is now read.
             if (self->m_windowActive && !self->m_currentChannelId.empty() && self->m_messageItems.Size() > 0)
             {
@@ -810,7 +828,20 @@ namespace winrt::DiscordWin3::implementation
     {
         if (type == L"READY")
         {
+            ::DiscordWin3::MemLog(L"ui: READY received");
             HandleReady(d);
+            // The parsed READY tree is gone: hand its pages back to Windows right away.
+            HeapCompact(GetProcessHeap(), 0);
+            ::DiscordWin3::MemLog(L"ui: READY handled");
+            [](weak_ref<MainWindow> weak) -> fire_and_forget
+            {
+                for (int s : { 5, 20, 60 })
+                {
+                    co_await resume_after(std::chrono::seconds(s == 5 ? 5 : s == 20 ? 15 : 40));
+                    if (!weak.get()) co_return;
+                    ::DiscordWin3::MemLog(s == 5 ? L"settled +5s" : s == 20 ? L"settled +20s" : L"settled +60s");
+                }
+            }(get_weak());
         }
         else if (type == L"MESSAGE_CREATE")
         {
@@ -1725,6 +1756,7 @@ namespace winrt::DiscordWin3::implementation
             {
                 AppendMessage(BuildMessage(array.GetAt(i).GetObject()));
             }
+            ::DiscordWin3::MemLog(L"channel loaded", array.Size());
             m_hasMoreOlder = array.Size() == 50;
             RequestMissingMembers();
             if (array.Size() > 0) Ack(id, Json::Str(array.GetAt(0).GetObject(), L"id"));

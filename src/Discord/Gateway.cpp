@@ -2,6 +2,7 @@
 #include "Gateway.h"
 #include "Json.h"
 #include "Rest.h"
+#include "../MemLog.h"
 
 using namespace winrt;
 using namespace Windows::Data::Json;
@@ -27,6 +28,97 @@ namespace DiscordWin3::Discord
             Hello = 10,
             HeartbeatAck = 11,
         };
+
+        // READY / GUILD_CREATE are megabytes of JSON and Windows.Data.Json costs ~27x the text in COM objects.
+        // Cut the subtrees this client never reads *before* parsing (plain text scan, no allocation per value).
+        bool IsStripped(std::wstring_view key)
+        {
+            static constexpr std::wstring_view Keys[] = {
+                L"experiments", L"guild_experiments", L"stickers", L"guild_scheduled_events", L"embedded_activities",
+                L"application_command_counts", L"soundboard_sounds", L"connected_accounts", L"consents", L"tutorial",
+                L"geo_ordered_rtc_regions", L"notes", L"game_relationships", L"broadcaster_user_ids", L"auth",
+                L"analytics_token", L"feature_settings", L"notification_settings", L"user_settings_proto",
+                L"features", L"incidents_data", L"home_header", L"splash", L"discovery_splash", L"banner",
+                L"threads", L"stage_instances", L"activity_instances", L"linked_users", L"guild_join_requests",
+                L"pending_payments", L"explicit_content_scan_version", L"static_client_session_id",
+                L"auth_session_id_hash", L"avatar_decoration_data", L"collectibles", L"display_name_styles",
+                L"profile_themes_experiment_bucket",
+            };
+            for (auto k : Keys) if (k == key) return true;
+            return false;
+        }
+
+        size_t SkipString(std::wstring_view s, size_t i)   // i at opening quote -> index after closing quote
+        {
+            for (++i; i < s.size(); ++i)
+            {
+                if (s[i] == L'\\') { ++i; continue; }
+                if (s[i] == L'"') return i + 1;
+            }
+            return s.size();
+        }
+
+        size_t SkipValue(std::wstring_view s, size_t i)    // i at first char of a value -> index after it
+        {
+            if (i >= s.size()) return i;
+            if (s[i] == L'"') return SkipString(s, i);
+            if (s[i] == L'{' || s[i] == L'[')
+            {
+                int depth = 0;
+                for (; i < s.size(); ++i)
+                {
+                    wchar_t c = s[i];
+                    if (c == L'"') { i = SkipString(s, i) - 1; continue; }
+                    if (c == L'{' || c == L'[') ++depth;
+                    else if ((c == L'}' || c == L']') && --depth == 0) return i + 1;
+                }
+                return s.size();
+            }
+            while (i < s.size() && s[i] != L',' && s[i] != L'}' && s[i] != L']') ++i;   // number / true / null
+            return i;
+        }
+
+        std::wstring StripUnusedKeys(std::wstring_view s)
+        {
+            std::wstring out;
+            out.reserve(s.size());
+            size_t i = 0;
+            while (i < s.size())
+            {
+                wchar_t c = s[i];
+                if (c != L'"')
+                {
+                    out.push_back(c);
+                    ++i;
+                    continue;
+                }
+                size_t end = SkipString(s, i);
+                size_t after = end;
+                while (after < s.size() && iswspace(s[after])) ++after;
+                bool isKey = after < s.size() && s[after] == L':';
+                if (!isKey || !IsStripped(s.substr(i + 1, end - i - 2)))
+                {
+                    out.append(s.substr(i, end - i));
+                    i = end;
+                    continue;
+                }
+                // Drop `"key": value` and one adjacent comma.
+                size_t v = after + 1;
+                while (v < s.size() && iswspace(s[v])) ++v;
+                i = SkipValue(s, v);
+                while (!out.empty() && iswspace(out.back())) out.pop_back();
+                if (!out.empty() && out.back() == L',')
+                {
+                    out.pop_back();
+                }
+                else
+                {
+                    while (i < s.size() && iswspace(s[i])) ++i;
+                    if (i < s.size() && s[i] == L',') ++i;
+                }
+            }
+            return out;
+        }
 
         JsonObject Payload(int op, IJsonValue const& d)
         {
@@ -184,11 +276,24 @@ namespace DiscordWin3::Discord
 
     void Gateway::OnText(hstring const& text, uint64_t generation)
     {
+        bool big = text.size() > 64 * 1024;
         JsonObject payload;
-        if (!JsonObject::TryParse(text, payload))
+        if (big)
+        {
+            ::DiscordWin3::MemLog(L"gateway: before parse", text.size());
+            auto slim = StripUnusedKeys(text);
+            ::DiscordWin3::MemLog(L"gateway: stripped", slim.size());
+            if (!JsonObject::TryParse(slim, payload))
+            {
+                return;
+            }
+            slim = {};
+        }
+        else if (!JsonObject::TryParse(text, payload))
         {
             return;
         }
+        if (big) ::DiscordWin3::MemLog(L"gateway: after parse");
 
         int op = static_cast<int>(Json::Num(payload, L"op", -1));
         std::wstring type;
@@ -378,7 +483,8 @@ namespace DiscordWin3::Discord
 
         JsonObject d;
         d.Insert(L"token", JsonValue::CreateStringValue(m_token));
-        d.Insert(L"capabilities", JsonValue::CreateNumberValue(0));
+        // 16 = DEDUPE_USER_OBJECTS: every user object is sent once in READY.users instead of per member / channel.
+        d.Insert(L"capabilities", JsonValue::CreateNumberValue(16));
         d.Insert(L"properties", ClientProperties());
         d.Insert(L"presence", presence);
         d.Insert(L"compress", JsonValue::CreateBooleanValue(false));
