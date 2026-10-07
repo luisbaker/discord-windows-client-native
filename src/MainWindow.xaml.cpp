@@ -2600,9 +2600,9 @@ namespace winrt::DiscordWin3::implementation
             auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(path);
             auto props = co_await file.GetBasicPropertiesAsync();
             co_await wil::resume_foreground(m_dispatcher);
-            if (props.Size() > 10ull * 1024 * 1024)
+            if (props.Size() > 20ull * 1024 * 1024)
             {
-                StatusText().Text(L"Fichier trop lourd (10 Mo max sans Nitro).");
+                StatusText().Text(L"Fichier trop lourd (20 Mo max sans Nitro).");
                 co_return;
             }
             StatusText().Text(L"Envoi de " + std::wstring{ file.Name() } + L"…");
