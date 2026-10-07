@@ -19,10 +19,12 @@ namespace DiscordWin3::Discord
         winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Data::Json::IJsonValue> GetJson(std::wstring path);
         winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Data::Json::IJsonValue> PostJson(
             std::wstring path, winrt::Windows::Data::Json::JsonObject body);
+        winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Data::Json::IJsonValue> PostContent(
+            std::wstring path, winrt::Windows::Web::Http::IHttpContent content);
 
     private:
         winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Data::Json::IJsonValue> Send(
-            winrt::Windows::Web::Http::HttpMethod method, std::wstring path, winrt::hstring body);
+            winrt::Windows::Web::Http::HttpMethod method, std::wstring path, std::function<winrt::Windows::Web::Http::IHttpContent()> content);
 
         std::wstring m_token;
         winrt::Windows::Web::Http::HttpClient m_client{ nullptr };

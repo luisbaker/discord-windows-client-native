@@ -76,27 +76,101 @@ namespace winrt::DiscordWin3::implementation
             return DefaultAvatar(id, Json::Str(user, L"discriminator"));
         }
 
-        std::wstring FormatTime(int64_t unixMs)
+        SYSTEMTIME ToLocal(int64_t unixMs)
         {
             // unix ms -> FILETIME (100ns since 1601) -> local SYSTEMTIME
             ULARGE_INTEGER t;
             t.QuadPart = static_cast<ULONGLONG>(unixMs) * 10000ULL + 116444736000000000ULL;
             FILETIME ft{ t.LowPart, t.HighPart };
-            SYSTEMTIME utc, local, now;
+            SYSTEMTIME utc, local;
             FileTimeToSystemTime(&ft, &utc);
             SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local);
+            return local;
+        }
+
+        int64_t DayNumber(SYSTEMTIME st)
+        {
+            st.wHour = st.wMinute = st.wSecond = st.wMilliseconds = 0;
+            FILETIME ft;
+            SystemTimeToFileTime(&st, &ft);
+            return static_cast<int64_t>((static_cast<ULONGLONG>(ft.dwHighDateTime) << 32 | ft.dwLowDateTime) / 864000000000ULL);
+        }
+
+        int64_t NowMs()
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        }
+
+        std::wstring FormatTime(int64_t unixMs)
+        {
+            SYSTEMTIME local = ToLocal(unixMs), now;
             GetLocalTime(&now);
+            int64_t delta = DayNumber(now) - DayNumber(local);
 
             wchar_t buf[64];
-            if (local.wYear == now.wYear && local.wMonth == now.wMonth && local.wDay == now.wDay)
+            if (delta == 0)
             {
                 swprintf_s(buf, L"Aujourd'hui à %02d:%02d", local.wHour, local.wMinute);
+            }
+            else if (delta == 1)
+            {
+                swprintf_s(buf, L"Hier à %02d:%02d", local.wHour, local.wMinute);
             }
             else
             {
                 swprintf_s(buf, L"%02d/%02d/%04d %02d:%02d", local.wDay, local.wMonth, local.wYear, local.wHour, local.wMinute);
             }
             return buf;
+        }
+
+        std::wstring LongDate(int64_t unixMs)
+        {
+            SYSTEMTIME local = ToLocal(unixMs);
+            wchar_t buf[96]{};
+            GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_LONGDATE, &local, nullptr, buf, 96, nullptr);
+            return buf;
+        }
+
+        std::wstring StatusLabel(std::wstring const& status)
+        {
+            if (status == L"idle") return L"Inactif";
+            if (status == L"dnd") return L"Ne pas déranger";
+            if (status == L"invisible" || status == L"offline") return L"Invisible";
+            return L"En ligne";
+        }
+
+        uint32_t StatusColor(std::wstring const& status)
+        {
+            if (status == L"idle") return 0xF0B232;
+            if (status == L"dnd") return 0xF23F43;
+            if (status == L"invisible" || status == L"offline") return 0x80848E;
+            return 0x23A55A;
+        }
+
+        std::wstring ActivityText(JsonArray const& activities)
+        {
+            if (!activities)
+            {
+                return {};
+            }
+            std::wstring fallback;
+            for (auto const& a : activities)
+            {
+                if (a.ValueType() != JsonValueType::Object) continue;
+                auto o = a.GetObject();
+                auto name = Json::Str(o, L"name");
+                switch (static_cast<int>(Json::Num(o, L"type", -1)))
+                {
+                case 4: if (auto state = Json::Str(o, L"state"); !state.empty()) return state; break;
+                case 0: if (fallback.empty()) fallback = L"Joue à " + name; break;
+                case 1: if (fallback.empty()) fallback = L"Streame " + name; break;
+                case 2: if (fallback.empty()) fallback = L"Écoute " + (name == L"Spotify" ? Json::Str(o, L"details") : name); break;
+                case 3: if (fallback.empty()) fallback = L"Regarde " + name; break;
+                case 5: if (fallback.empty()) fallback = L"Participe à " + name; break;
+                }
+            }
+            return fallback;
         }
 
         std::wstring Upper(std::wstring s)
@@ -172,6 +246,14 @@ namespace winrt::DiscordWin3::implementation
         GuildList().ItemsSource(m_guildItems);
         ChannelList().ItemsSource(m_channelItems);
         MessageList().ItemsSource(m_messageItems);
+        MemberList().ItemsSource(m_memberItems);
+
+        m_typingTimer = m_dispatcher.CreateTimer();
+        m_typingTimer.Interval(std::chrono::seconds(1));
+        m_typingTimer.Tick([weak = get_weak()](auto&&, auto&&)
+        {
+            if (auto self = weak.get()) self->UpdateTypingText();
+        });
 
         // Minimized = background mode: give memory back, lower memory & CPU priority.
         AppWindow().Changed([weak = get_weak()](Microsoft::UI::Windowing::AppWindow const& window,
@@ -566,10 +648,22 @@ namespace winrt::DiscordWin3::implementation
         m_guildItems.Clear();
         m_channelItems.Clear();
         m_messageItems.Clear();
+        m_memberItems.Clear();
+        m_memberListGuild.clear();
+        m_collapsed.clear();
+        m_typing.clear();
+        m_typingTimer.Stop();
+        TypingText().Text(L"");
         ChannelTitle().Text(L"");
+        ChannelGlyph().Text(L"");
+        ChannelAvatarBorder().Visibility(Visibility::Collapsed);
+        TitleText().Text(L"Discord Win3");
+        TitleIcon().Source(nullptr);
         SelfName().Text(L"");
+        SelfStatusText().Text(L"");
         SelfAvatar().Source(nullptr);
         Composer().IsEnabled(false);
+        AttachButton().IsEnabled(false);
         ::DiscordWin3::ImageCache::Clear();
     }
 
@@ -607,8 +701,20 @@ namespace winrt::DiscordWin3::implementation
             }
             if (channelId == m_currentChannelId)
             {
+                if (m_typing.erase(Json::Str(Json::Obj(d, L"author"), L"id")))
+                {
+                    UpdateTypingText();
+                }
                 AppendMessage(BuildMessage(d));
             }
+        }
+        else if (type == L"TYPING_START")
+        {
+            OnTypingStart(d);
+        }
+        else if (type == L"GUILD_MEMBER_LIST_UPDATE")
+        {
+            OnMemberListUpdate(d);
         }
         else if (type == L"MESSAGE_UPDATE")
         {
@@ -619,8 +725,8 @@ namespace winrt::DiscordWin3::implementation
             int index = FindMessage(Json::Str(d, L"id"));
             if (index >= 0)
             {
-                bool header = Impl(m_messageItems.GetAt(index))->ShowsHeader();
-                m_messageItems.SetAt(index, make<MessageItem>(BuildMessage(d), header));
+                auto old = Impl(m_messageItems.GetAt(index));
+                m_messageItems.SetAt(index, make<MessageItem>(BuildMessage(d), old->ShowsHeader(), old->Day()));
             }
         }
         else if (type == L"MESSAGE_DELETE")
@@ -917,6 +1023,22 @@ namespace winrt::DiscordWin3::implementation
         SelfName().Text(self.name);
         SelfAvatar().Source(::DiscordWin3::ImageCache::Get(self.avatarUrl, 32));
 
+        // Own status + custom status, as shown in the user panel.
+        std::wstring status = L"online";
+        std::wstring customStatus;
+        if (auto settings = Json::Obj(d, L"user_settings"))
+        {
+            if (auto s = Json::Str(settings, L"status"); !s.empty()) status = s;
+            customStatus = Json::Str(Json::Obj(settings, L"custom_status"), L"text");
+        }
+        if (auto sessions = Json::Arr(d, L"sessions"); sessions && sessions.Size() > 0
+            && sessions.GetAt(0).ValueType() == JsonValueType::Object)
+        {
+            if (auto s = Json::Str(sessions.GetAt(0).GetObject(), L"status"); !s.empty()) status = s;
+        }
+        SelfStatus().Fill(SolidBrush(StatusColor(status)).as<Media::SolidColorBrush>());
+        SelfStatusText().Text(customStatus.empty() ? StatusLabel(status) : customStatus);
+
         if (auto users = Json::Arr(d, L"users"))
         {
             for (auto const& u : users)
@@ -1158,8 +1280,14 @@ namespace winrt::DiscordWin3::implementation
             {
                 auto& list = children[category->id];
                 if (list.empty()) continue;
-                items.push_back(make<ChannelItem>(hstring{ category->id }, hstring{ Upper(category->name) }, L"",
-                                                  ChannelKind::Category));
+                bool collapsed = m_collapsed.contains(category->id);
+                items.push_back(make<ChannelItem>(hstring{ category->id }, hstring{ Upper(category->name) },
+                                                  collapsed ? L"›" : L"⌄", ChannelKind::Category));
+                if (collapsed)
+                {
+                    // Like Discord: a collapsed category still shows the channel you are in.
+                    std::erase_if(list, [&](ChannelInfo const* c) { return c->id != m_currentChannelId; });
+                }
                 emit(list);
             }
         }
@@ -1184,7 +1312,11 @@ namespace winrt::DiscordWin3::implementation
             return;
         }
         m_currentGuildId = item.Id();
+        m_memberItems.Clear();
+        m_memberListGuild.clear();
+        MembersPane().Visibility(Show(MembersToggle().IsChecked().Value() && m_currentGuildId != HomeId));
         RefreshChannelList();
+        UpdateTitle();
 
         // Auto-open the first text channel, like the official client.
         for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
@@ -1223,7 +1355,65 @@ namespace winrt::DiscordWin3::implementation
             ChannelList().SelectedIndex(-1);
             return;
         }
-        LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Glyph() } + L" " + std::wstring{ item.Name() });
+        // Header: "# name" for guild channels, avatar + name for DMs (like the official client).
+        auto impl = get_self<implementation::ChannelItem>(item);
+        bool hasAvatar = impl->AvatarVisibility() == Visibility::Visible;
+        ChannelGlyph().Text(hasAvatar ? L"" : item.Glyph());
+        ChannelGlyph().Visibility(Show(!hasAvatar));
+        ChannelAvatarBorder().Visibility(Show(hasAvatar));
+        ChannelAvatar().Source(hasAvatar ? item.Avatar() : nullptr);
+        LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Name() });
+        Composer().PlaceholderText(L"Envoyer un message " + std::wstring{ m_currentGuildId == HomeId ? L"à @" : L"dans #" }
+                                   + std::wstring{ item.Name() });
+        UpdateTitle();
+    }
+
+    void MainWindow::OnChannelClicked(IInspectable const&, ItemClickEventArgs const& e)
+    {
+        auto item = e.ClickedItem().try_as<DiscordWin3::ChannelItem>();
+        if (!item || !item.IsCategory())
+        {
+            return;
+        }
+        std::wstring id{ item.Id() };
+        if (!m_collapsed.erase(id))
+        {
+            m_collapsed.insert(id);
+        }
+        RefreshChannelList();
+    }
+
+    void MainWindow::OnToggleMembers(IInspectable const&, RoutedEventArgs const&)
+    {
+        bool show = MembersToggle().IsChecked().Value() && m_currentGuildId != HomeId;
+        MembersPane().Visibility(Show(show));
+        if (!show)
+        {
+            // Hidden list = no need to keep its rows (and avatars) alive.
+            m_memberItems.Clear();
+            m_memberListGuild.clear();
+        }
+        else
+        {
+            SubscribeMembers();
+        }
+    }
+
+    void MainWindow::UpdateTitle()
+    {
+        if (m_currentGuildId == HomeId)
+        {
+            auto name = ChannelTitle().Text();
+            TitleText().Text(name.empty() ? hstring{ L"Messages privés" } : name);
+            TitleIcon().Source(ChannelAvatar().Source());
+            return;
+        }
+        if (auto guild = FindGuild(m_currentGuildId))
+        {
+            TitleText().Text(guild->name);
+            TitleIcon().Source(guild->icon.empty() ? nullptr
+                : ::DiscordWin3::ImageCache::Get(std::wstring{ Discord::CdnBase } + L"/icons/" + guild->id + L"/" + guild->icon + L".png?size=96", 16));
+        }
     }
 
     // ------------------------------------------------------------------ members
@@ -1312,7 +1502,7 @@ namespace winrt::DiscordWin3::implementation
             ApplyMember(data);
             if (data.authorName != item->Data().authorName || data.avatarUrl != item->Data().avatarUrl || data.color != item->Data().color)
             {
-                m_messageItems.SetAt(i, make<MessageItem>(std::move(data), item->ShowsHeader()));
+                m_messageItems.SetAt(i, make<MessageItem>(std::move(data), item->ShowsHeader(), item->Day()));
             }
         }
 
@@ -1335,8 +1525,11 @@ namespace winrt::DiscordWin3::implementation
         m_loadingOlder = false;
         ChannelTitle().Text(title);
         Composer().IsEnabled(true);
-        Composer().PlaceholderText(L"Envoyer un message dans " + title);
+        AttachButton().IsEnabled(true);
         StatusText().Text(L"");
+        m_typing.clear();
+        UpdateTypingText();
+        SubscribeMembers();
 
         // Fade/slide the old content out while the new one loads.
         MessageList().Opacity(0);
@@ -1379,7 +1572,8 @@ namespace winrt::DiscordWin3::implementation
             std::wstring message{ error };
             MessageData info;
             info.authorName = L"Discord Win3";
-            info.content = message.starts_with(L"HTTP 403") ? L"Tu n'as pas accès à ce salon." : L"Erreur de chargement : " + message;
+            info.body.push_back({ ::DiscordWin3::Segment::Kind::Text,
+                message.starts_with(L"HTTP 403") ? L"Tu n'as pas accès à ce salon." : L"Erreur de chargement : " + message });
             AppendMessage(std::move(info));
         }
         AnimateMessagesIn();
@@ -1417,8 +1611,7 @@ namespace winrt::DiscordWin3::implementation
             }
             for (int i = static_cast<int>(batch.size()) - 1; i >= 0; --i)
             {
-                bool header = ShouldShowHeader(i > 0 ? &batch[i - 1] : nullptr, batch[i]);
-                m_messageItems.InsertAt(0, make<MessageItem>(batch[i], header));
+                m_messageItems.InsertAt(0, MakeRow(batch[i], i > 0 ? &batch[i - 1] : nullptr));
             }
             FixHeaderAt(static_cast<uint32_t>(batch.size()));
             RequestMissingMembers();
@@ -1507,8 +1700,23 @@ namespace winrt::DiscordWin3::implementation
         }
     }
 
-    std::wstring MainWindow::FormatContent(std::wstring const& raw, JsonObject const& m)
+    // ------------------------------------------------------------------ message body
+
+    std::vector<::DiscordWin3::Segment> MainWindow::ParseBody(std::wstring const& raw, JsonObject const& m)
     {
+        using Kind = ::DiscordWin3::Segment::Kind;
+        std::vector<::DiscordWin3::Segment> out;
+        auto push = [&](Kind kind, std::wstring text, std::wstring url = {})
+        {
+            if (text.empty() && kind != Kind::Emoji) return;
+            if (kind == Kind::Text && !out.empty() && out.back().kind == Kind::Text)
+            {
+                out.back().text += text;
+                return;
+            }
+            out.push_back({ kind, std::move(text), std::move(url) });
+        };
+
         std::unordered_map<std::wstring, std::wstring> mentions;
         if (auto list = Json::Arr(m, L"mentions"))
         {
@@ -1522,70 +1730,303 @@ namespace winrt::DiscordWin3::implementation
             }
         }
 
-        std::wstring out;
-        out.reserve(raw.size());
         size_t i = 0;
+        std::wstring text;
+        auto flush = [&]() { push(Kind::Text, std::move(text)); text.clear(); };
+
         while (i < raw.size())
         {
-            size_t close;
-            if (raw[i] != L'<' || (close = raw.find(L'>', i)) == std::wstring::npos || close - i > 80)
+            std::wstring_view rest{ raw.data() + i, raw.size() - i };
+
+            // ```code block```
+            if (rest.starts_with(L"```"))
             {
-                out.push_back(raw[i++]);
+                auto end = raw.find(L"```", i + 3);
+                if (end != std::wstring::npos)
+                {
+                    flush();
+                    auto code = raw.substr(i + 3, end - i - 3);
+                    // Drop the language hint on the first line ("```cpp").
+                    if (auto nl = code.find(L'\n'); nl != std::wstring::npos && code.find(L' ') > nl && nl < 20)
+                        code = code.substr(nl + 1);
+                    while (!code.empty() && (code.back() == L'\n' || code.back() == L'\r')) code.pop_back();
+                    push(Kind::CodeBlock, std::move(code));
+                    i = end + 3;
+                    continue;
+                }
+            }
+            // `inline code`
+            if (rest.starts_with(L"`"))
+            {
+                auto end = raw.find(L'`', i + 1);
+                if (end != std::wstring::npos && end > i + 1)
+                {
+                    flush();
+                    push(Kind::Code, raw.substr(i + 1, end - i - 1));
+                    i = end + 1;
+                    continue;
+                }
+            }
+            // **bold**
+            if (rest.starts_with(L"**"))
+            {
+                auto end = raw.find(L"**", i + 2);
+                if (end != std::wstring::npos && end > i + 2)
+                {
+                    flush();
+                    push(Kind::Bold, raw.substr(i + 2, end - i - 2));
+                    i = end + 2;
+                    continue;
+                }
+            }
+            // bare links
+            if (rest.starts_with(L"https://") || rest.starts_with(L"http://"))
+            {
+                size_t end = i;
+                while (end < raw.size() && !iswspace(raw[end]) && raw[end] != L'>') ++end;
+                flush();
+                auto url = raw.substr(i, end - i);
+                push(Kind::Link, url, url);
+                i = end;
                 continue;
             }
-            std::wstring_view tag{ raw.data() + i + 1, close - i - 1 };
-            std::wstring replacement;
-
-            if (tag.starts_with(L"@&"))
+            // <@user> <@&role> <#channel> <:emoji:id> <t:123:R> <https://...>
+            if (raw[i] == L'<')
             {
-                auto it = m_roleNames.find(std::wstring{ tag.substr(2) });
-                replacement = L"@" + (it != m_roleNames.end() ? it->second : std::wstring{ L"rôle" });
-            }
-            else if (tag.starts_with(L"@"))
-            {
-                auto id = std::wstring{ tag.substr(tag.starts_with(L"@!") ? 2 : 1) };
-                std::wstring name;
-                if (auto g = m_members.find(m_currentGuildId); g != m_members.end())
+                auto close = raw.find(L'>', i);
+                if (close != std::wstring::npos && close - i <= 100)
                 {
-                    if (auto mem = g->second.find(id); mem != g->second.end()) name = mem->second.nick;
+                    std::wstring_view tag{ raw.data() + i + 1, close - i - 1 };
+                    bool handled = true;
+                    if (tag.starts_with(L"@&"))
+                    {
+                        auto it = m_roleNames.find(std::wstring{ tag.substr(2) });
+                        flush();
+                        push(Kind::Mention, L"@" + (it != m_roleNames.end() ? it->second : std::wstring{ L"rôle" }));
+                    }
+                    else if (tag.starts_with(L"@"))
+                    {
+                        auto id = std::wstring{ tag.substr(tag.starts_with(L"@!") ? 2 : 1) };
+                        std::wstring name;
+                        if (auto g = m_members.find(m_currentGuildId); g != m_members.end())
+                        {
+                            if (auto mem = g->second.find(id); mem != g->second.end()) name = mem->second.nick;
+                        }
+                        if (name.empty()) if (auto it = mentions.find(id); it != mentions.end()) name = it->second;
+                        if (name.empty()) if (auto it = m_users.find(id); it != m_users.end()) name = it->second.name;
+                        flush();
+                        push(Kind::Mention, L"@" + (name.empty() ? std::wstring{ L"utilisateur" } : name));
+                    }
+                    else if (tag.starts_with(L"#"))
+                    {
+                        auto it = m_channelNames.find(std::wstring{ tag.substr(1) });
+                        flush();
+                        push(Kind::Mention, L"#" + (it != m_channelNames.end() ? it->second : std::wstring{ L"salon-inconnu" }));
+                    }
+                    else if (tag.starts_with(L":") || tag.starts_with(L"a:"))
+                    {
+                        auto start = tag.find(L':');
+                        auto end = tag.find(L':', start + 1);
+                        if (end == std::wstring_view::npos)
+                        {
+                            handled = false;
+                        }
+                        else
+                        {
+                            flush();
+                            // Static PNG even for animated emojis: no GIF decoder kept alive per emoji.
+                            auto id = std::wstring{ tag.substr(end + 1) };
+                            push(Kind::Emoji, L":" + std::wstring{ tag.substr(start + 1, end - start - 1) } + L":",
+                                 std::wstring{ Discord::CdnBase } + L"/emojis/" + id + L".png?size=48");
+                        }
+                    }
+                    else if (tag.starts_with(L"t:"))
+                    {
+                        auto ts = tag.substr(2);
+                        text += FormatTime(static_cast<int64_t>(Json::U64(ts.substr(0, ts.find(L':')))) * 1000);
+                    }
+                    else if (tag.starts_with(L"http"))
+                    {
+                        flush();
+                        push(Kind::Link, std::wstring{ tag }, std::wstring{ tag });
+                    }
+                    else
+                    {
+                        handled = false;
+                    }
+                    if (handled)
+                    {
+                        i = close + 1;
+                        continue;
+                    }
                 }
-                if (name.empty()) if (auto it = mentions.find(id); it != mentions.end()) name = it->second;
-                if (name.empty()) if (auto it = m_users.find(id); it != m_users.end()) name = it->second.name;
-                replacement = L"@" + (name.empty() ? std::wstring{ L"utilisateur" } : name);
             }
-            else if (tag.starts_with(L"#"))
-            {
-                auto it = m_channelNames.find(std::wstring{ tag.substr(1) });
-                replacement = L"#" + (it != m_channelNames.end() ? it->second : std::wstring{ L"salon-inconnu" });
-            }
-            else if (tag.starts_with(L":") || tag.starts_with(L"a:"))
-            {
-                auto start = tag.find(L':');
-                auto end = tag.find(L':', start + 1);
-                replacement = end == std::wstring_view::npos ? std::wstring{ tag } : L":" + std::wstring{ tag.substr(start + 1, end - start - 1) } + L":";
-            }
-            else if (tag.starts_with(L"t:"))
-            {
-                auto rest = tag.substr(2);
-                auto colon = rest.find(L':');
-                replacement = FormatTime(static_cast<int64_t>(Json::U64(rest.substr(0, colon))) * 1000);
-            }
-            else if (tag.starts_with(L"http"))
-            {
-                replacement = std::wstring{ tag };
-            }
-            else
-            {
-                replacement = L"<" + std::wstring{ tag } + L">";
-            }
-            out += replacement;
-            i = close + 1;
+            text.push_back(raw[i++]);
+        }
+        flush();
+        return out;
+    }
+
+    std::wstring MainWindow::PlainText(std::wstring const& raw, JsonObject const& m)
+    {
+        std::wstring out;
+        for (auto const& s : ParseBody(raw, m))
+        {
+            out += s.text;
         }
         return out;
     }
 
+    void MainWindow::RenderBody(RichTextBlock const& block, MessageData const& data)
+    {
+        using Kind = ::DiscordWin3::Segment::Kind;
+        using namespace Microsoft::UI::Xaml::Documents;
+
+        block.Blocks().Clear();
+        if (data.body.empty())
+        {
+            return;
+        }
+
+        // Emoji-only messages get "jumbo" emojis, like Discord.
+        bool jumbo = std::all_of(data.body.begin(), data.body.end(), [](auto const& s)
+        {
+            return s.kind == Kind::Emoji || (s.kind == Kind::Text && std::all_of(s.text.begin(), s.text.end(), iswspace));
+        });
+        double emojiSize = jumbo ? 48 : 22;
+
+        Paragraph paragraph;
+        auto inlines = paragraph.Inlines();
+        for (auto const& s : data.body)
+        {
+            switch (s.kind)
+            {
+            case Kind::Text:
+            {
+                Run run;
+                run.Text(s.text);
+                inlines.Append(run);
+                break;
+            }
+            case Kind::Bold:
+            {
+                Run run;
+                run.Text(s.text);
+                run.FontWeight(Windows::UI::Text::FontWeight{ 700 });
+                inlines.Append(run);
+                break;
+            }
+            case Kind::Code:
+            {
+                Run run;
+                run.Text(s.text);
+                run.FontFamily(Media::FontFamily{ L"Cascadia Mono, Consolas" });
+                run.FontSize(13);
+                run.Foreground(SolidBrush(0xE6E6E6).as<Media::Brush>());
+                inlines.Append(run);
+                break;
+            }
+            case Kind::CodeBlock:
+            {
+                Border box;
+                box.Background(SolidBrush(0x111214));
+                box.BorderBrush(SolidBrush(0x2A2A2F));
+                box.BorderThickness({ 1, 1, 1, 1 });
+                box.CornerRadius({ 4, 4, 4, 4 });
+                box.Padding({ 10, 8, 10, 8 });
+                box.Margin({ 0, 4, 0, 4 });
+                TextBlock code;
+                code.Text(s.text);
+                code.FontFamily(Media::FontFamily{ L"Cascadia Mono, Consolas" });
+                code.FontSize(13);
+                code.TextWrapping(TextWrapping::Wrap);
+                code.IsTextSelectionEnabled(true);
+                box.Child(code);
+                InlineUIContainer container;
+                container.Child(box);
+                inlines.Append(LineBreak{});
+                inlines.Append(container);
+                inlines.Append(LineBreak{});
+                break;
+            }
+            case Kind::Mention:
+            {
+                // Blurple pill.
+                Border pill;
+                pill.Background(SolidBrush(0x5865F2, 0x4D));
+                pill.CornerRadius({ 3, 3, 3, 3 });
+                pill.Padding({ 2, 0, 2, 0 });
+                pill.Margin({ 0, 0, 0, -4 });
+                TextBlock label;
+                label.Text(s.text);
+                label.FontSize(15);
+                label.FontWeight(Windows::UI::Text::FontWeight{ 500 });
+                label.Foreground(SolidBrush(0xC9CDFB));
+                pill.Child(label);
+                InlineUIContainer container;
+                container.Child(pill);
+                inlines.Append(container);
+                break;
+            }
+            case Kind::Link:
+            {
+                Hyperlink link;
+                try
+                {
+                    link.NavigateUri(Uri{ s.url });
+                }
+                catch (...)
+                {
+                }
+                link.UnderlineStyle(UnderlineStyle::None);
+                link.Foreground(SolidBrush(0x00A8FC));
+                Run run;
+                run.Text(s.text);
+                link.Inlines().Append(run);
+                inlines.Append(link);
+                break;
+            }
+            case Kind::Emoji:
+            {
+                Image image;
+                image.Width(emojiSize);
+                image.Height(emojiSize);
+                image.Margin({ 1, 0, 1, jumbo ? 0.0 : -5.0 });
+                image.Source(::DiscordWin3::ImageCache::Get(s.url, static_cast<int>(emojiSize)));
+                ToolTipService::SetToolTip(image, box_value(s.text));
+                InlineUIContainer container;
+                container.Child(image);
+                inlines.Append(container);
+                break;
+            }
+            }
+        }
+        block.Blocks().Append(paragraph);
+    }
+
+    void MainWindow::OnMessageContainerChanging(ListViewBase const&, ContainerContentChangingEventArgs const& args)
+    {
+        auto root = args.ItemContainer().ContentTemplateRoot().try_as<FrameworkElement>();
+        if (!root)
+        {
+            return;
+        }
+        auto body = root.FindName(L"Body").try_as<RichTextBlock>();
+        if (!body)
+        {
+            return;
+        }
+        if (args.InRecycleQueue())
+        {
+            body.Blocks().Clear();   // release inline images of rows scrolled away
+            return;
+        }
+        RenderBody(body, Impl(args.Item())->Data());
+    }
+
     MessageData MainWindow::BuildMessage(JsonObject const& m)
     {
+        using Kind = ::DiscordWin3::Segment::Kind;
         MessageData data;
         data.id = Json::Str(m, L"id");
         data.unixMs = Json::SnowflakeMs(data.id);
@@ -1616,21 +2057,46 @@ namespace winrt::DiscordWin3::implementation
             ApplyMember(data);
         }
 
-        std::wstring content = FormatContent(Json::Str(m, L"content"), m);
-
-        int type = static_cast<int>(Json::Num(m, L"type"));
-        switch (type)
+        // Server tag next to the name ("⚡IPv6" in the official client).
+        auto primaryGuild = Json::Obj(author, L"primary_guild");
+        if (!primaryGuild) primaryGuild = Json::Obj(author, L"clan");
+        if (primaryGuild && Json::Bool(primaryGuild, L"identity_enabled", true))
         {
-        case 7: content = L"→ a rejoint le serveur."; data.forceHeader = true; break;
-        case 6: content = L"📌 a épinglé un message."; data.forceHeader = true; break;
-        case 8: case 9: case 10: case 11: content = L"🚀 a boosté le serveur !"; data.forceHeader = true; break;
+            data.tag = Json::Str(primaryGuild, L"tag");
+        }
+
+        // Highlight rows that ping me.
+        data.mentionsMe = Json::Bool(m, L"mention_everyone");
+        if (auto list = Json::Arr(m, L"mentions"))
+        {
+            for (auto const& u : list)
+            {
+                if (u.ValueType() == JsonValueType::Object && Json::Str(u.GetObject(), L"id") == m_selfId)
+                {
+                    data.mentionsMe = true;
+                }
+            }
+        }
+
+        data.body = ParseBody(Json::Str(m, L"content"), m);
+        auto system = [&](std::wstring text)
+        {
+            data.body = { { Kind::Text, std::move(text) } };
+            data.forceHeader = true;
+        };
+
+        switch (static_cast<int>(Json::Num(m, L"type")))
+        {
+        case 7: system(L"→ a rejoint le serveur."); break;
+        case 6: system(L"📌 a épinglé un message."); break;
+        case 8: case 9: case 10: case 11: system(L"🚀 a boosté le serveur !"); break;
         case 19:
             if (auto ref = Json::Obj(m, L"referenced_message"))
             {
-                auto refAuthor = Json::Obj(ref, L"author");
-                auto snippet = Json::Str(ref, L"content");
-                if (snippet.size() > 80) snippet = snippet.substr(0, 80) + L"…";
-                content = L"↪ @" + UserDisplayName(refAuthor) + L" : " + snippet + L"\n" + content;
+                auto snippet = PlainText(Json::Str(ref, L"content"), ref);
+                if (snippet.size() > 100) snippet = snippet.substr(0, 100) + L"…";
+                for (auto& c : snippet) if (c == L'\n') c = L' ';
+                data.reply = L"↱ @" + UserDisplayName(Json::Obj(ref, L"author")) + L"  " + snippet;
             }
             data.forceHeader = true;
             break;
@@ -1680,12 +2146,14 @@ namespace winrt::DiscordWin3::implementation
                         if (setImage(Json::Str(img, L"proxy_url"), Json::Num(img, L"width"), Json::Num(img, L"height"))) break;
                     }
                 }
-                auto title = Json::Str(o, L"title");
-                auto description = Json::Str(o, L"description");
-                if (!title.empty() || !description.empty())
+                if (data.embedTitle.empty() && data.embedDescription.empty())
                 {
-                    content += (content.empty() ? L"" : L"\n") + std::wstring{ L"▌ " } + title
-                        + (description.empty() ? L"" : L"\n▌ " + FormatContent(description.substr(0, 300), m));
+                    data.embedProvider = Json::Str(Json::Obj(o, L"provider"), L"name");
+                    if (data.embedProvider.empty()) data.embedProvider = Json::Str(Json::Obj(o, L"author"), L"name");
+                    data.embedTitle = Json::Str(o, L"title");
+                    auto description = Json::Str(o, L"description");
+                    data.embedDescription = PlainText(description.substr(0, 350), m);
+                    data.embedColor = static_cast<uint32_t>(Json::Num(o, L"color"));
                 }
             }
         }
@@ -1695,15 +2163,14 @@ namespace winrt::DiscordWin3::implementation
             for (auto const& s : stickers)
             {
                 if (s.ValueType() == JsonValueType::Object)
-                    content += (content.empty() ? L"" : L"\n") + (L"[Sticker : " + Json::Str(s.GetObject(), L"name") + L"]");
+                    data.body.push_back({ Kind::Text, (data.body.empty() ? L"" : L"\n") + (L"[Sticker : " + Json::Str(s.GetObject(), L"name") + L"]") });
             }
         }
 
-        if (Json::Get(m, L"edited_timestamp"))
+        if (Json::Get(m, L"edited_timestamp") && !data.body.empty())
         {
-            content += L" (modifié)";
+            data.body.push_back({ Kind::Text, L" (modifié)" });
         }
-        data.content = std::move(content);
         return data;
     }
 
@@ -1713,12 +2180,27 @@ namespace winrt::DiscordWin3::implementation
             || cur.unixMs - prev->unixMs > GroupWindowMs;
     }
 
+    std::wstring MainWindow::DayLabel(MessageData const* prev, MessageData const& cur)
+    {
+        if (cur.unixMs == 0 || (prev && DayNumber(ToLocal(prev->unixMs)) == DayNumber(ToLocal(cur.unixMs))))
+        {
+            return {};
+        }
+        return LongDate(cur.unixMs);
+    }
+
+    DiscordWin3::MessageItem MainWindow::MakeRow(MessageData data, MessageData const* prev)
+    {
+        auto day = DayLabel(prev, data);
+        bool header = !day.empty() || ShouldShowHeader(prev, data);
+        return make<MessageItem>(std::move(data), header, std::move(day));
+    }
+
     void MainWindow::AppendMessage(MessageData data)
     {
         uint32_t size = m_messageItems.Size();
         MessageData const* prev = size ? &Impl(m_messageItems.GetAt(size - 1))->Data() : nullptr;
-        bool header = ShouldShowHeader(prev, data);
-        m_messageItems.Append(make<MessageItem>(std::move(data), header));
+        m_messageItems.Append(MakeRow(std::move(data), prev));
 
         // Bound memory in busy channels: drop the oldest rows once we are past the cap.
         if (m_messageItems.Size() > MaxMessages)
@@ -1737,10 +2219,273 @@ namespace winrt::DiscordWin3::implementation
         }
         auto item = Impl(m_messageItems.GetAt(index));
         MessageData const* prev = index ? &Impl(m_messageItems.GetAt(index - 1))->Data() : nullptr;
-        bool header = ShouldShowHeader(prev, item->Data());
-        if (header != item->ShowsHeader())
+        auto day = DayLabel(prev, item->Data());
+        bool header = !day.empty() || ShouldShowHeader(prev, item->Data());
+        if (header != item->ShowsHeader() || day != item->Day())
         {
-            m_messageItems.SetAt(index, make<MessageItem>(item->Data(), header));
+            m_messageItems.SetAt(index, make<MessageItem>(item->Data(), header, std::move(day)));
+        }
+    }
+
+    // ------------------------------------------------------------------ member list
+
+    void MainWindow::SubscribeMembers()
+    {
+        if (!m_gateway || m_currentGuildId.empty() || m_currentGuildId == HomeId || m_currentChannelId.empty()
+            || !MembersToggle().IsChecked().Value())
+        {
+            return;
+        }
+        if (m_memberListGuild != m_currentGuildId)
+        {
+            m_memberItems.Clear();
+        }
+        m_memberListGuild = m_currentGuildId;
+        m_gateway->SubscribeMemberList(m_currentGuildId, m_currentChannelId);
+    }
+
+    IInspectable MainWindow::BuildMemberRow(JsonObject const& item, GuildInfo const& guild)
+    {
+        if (auto group = Json::Obj(item, L"group"))
+        {
+            auto id = Json::Str(group, L"id");
+            std::wstring title = id == L"online" ? L"En ligne" : id == L"offline" ? L"Hors ligne" : L"";
+            if (title.empty())
+            {
+                auto it = m_roleNames.find(id);
+                title = it != m_roleNames.end() ? it->second : L"Rôle";
+            }
+            int count = static_cast<int>(Json::Num(group, L"count", -1));
+            if (count < 0) { auto it = m_memberGroupCounts.find(id); count = it != m_memberGroupCounts.end() ? it->second : 0; }
+            return make<MemberItem>(title + L" — " + std::to_wstring(count));
+        }
+
+        auto member = Json::Obj(item, L"member");
+        auto user = Json::Obj(member, L"user");
+        if (!member || !user)
+        {
+            return nullptr;
+        }
+        CacheMember(guild, member);
+        auto userId = Json::Str(user, L"id");
+        auto const& cachedUser = m_users[userId];
+        auto const& cachedMember = m_members[guild.id][userId];
+
+        auto presence = Json::Obj(member, L"presence");
+        return make<MemberItem>(
+            cachedMember.nick.empty() ? cachedUser.name : cachedMember.nick,
+            cachedMember.color,
+            cachedMember.avatarUrl.empty() ? cachedUser.avatarUrl : cachedMember.avatarUrl,
+            Json::Str(presence, L"status"),
+            ActivityText(Json::Arr(presence, L"activities")));
+    }
+
+    void MainWindow::OnMemberListUpdate(JsonObject const& d)
+    {
+        constexpr uint32_t MaxRows = 100;
+        auto guild = FindGuild(Json::Str(d, L"guild_id"));
+        auto ops = Json::Arr(d, L"ops");
+        if (!guild || !ops || guild->id != m_memberListGuild)
+        {
+            return;
+        }
+
+        // Group counts live in d.groups (items only carry the id).
+        if (auto groups = Json::Arr(d, L"groups"))
+        {
+            for (auto const& g : groups)
+            {
+                if (g.ValueType() == JsonValueType::Object)
+                    m_memberGroupCounts[Json::Str(g.GetObject(), L"id")] = static_cast<int>(Json::Num(g.GetObject(), L"count"));
+            }
+        }
+
+        for (auto const& value : ops)
+        {
+            if (value.ValueType() != JsonValueType::Object) continue;
+            auto op = value.GetObject();
+            auto kind = Json::Str(op, L"op");
+            auto index = static_cast<uint32_t>(Json::Num(op, L"index"));
+
+            if (kind == L"SYNC")
+            {
+                auto range = Json::Arr(op, L"range");
+                if (!range || range.Size() < 1 || range.GetNumberAt(0) != 0) continue;
+                std::vector<IInspectable> rows;
+                if (auto items = Json::Arr(op, L"items"))
+                {
+                    for (auto const& it : items)
+                    {
+                        if (it.ValueType() != JsonValueType::Object) continue;
+                        if (auto row = BuildMemberRow(it.GetObject(), *guild)) rows.push_back(row);
+                        if (rows.size() >= MaxRows) break;
+                    }
+                }
+                m_memberItems.ReplaceAll(rows);
+            }
+            else if (kind == L"INSERT" && index <= m_memberItems.Size() && index < MaxRows)
+            {
+                if (auto row = BuildMemberRow(Json::Obj(op, L"item"), *guild))
+                {
+                    m_memberItems.InsertAt(index, row);
+                    if (m_memberItems.Size() > MaxRows) m_memberItems.RemoveAtEnd();
+                }
+            }
+            else if (kind == L"UPDATE" && index < m_memberItems.Size())
+            {
+                if (auto row = BuildMemberRow(Json::Obj(op, L"item"), *guild))
+                {
+                    m_memberItems.SetAt(index, row);
+                }
+            }
+            else if (kind == L"DELETE" && index < m_memberItems.Size())
+            {
+                m_memberItems.RemoveAt(index);
+            }
+            else if (kind == L"INVALIDATE")
+            {
+                auto range = Json::Arr(op, L"range");
+                if (range && range.Size() > 0 && range.GetNumberAt(0) == 0) m_memberItems.Clear();
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ typing
+
+    void MainWindow::OnTypingStart(JsonObject const& d)
+    {
+        auto userId = Json::Str(d, L"user_id");
+        if (Json::Str(d, L"channel_id") != m_currentChannelId || userId == m_selfId)
+        {
+            return;
+        }
+        std::wstring name;
+        if (auto member = Json::Obj(d, L"member"))
+        {
+            name = Json::Str(member, L"nick");
+            if (name.empty()) name = UserDisplayName(Json::Obj(member, L"user"));
+        }
+        if (name.empty())
+        {
+            auto it = m_users.find(userId);
+            name = it != m_users.end() ? it->second.name : L"Quelqu'un";
+        }
+        m_typing[userId] = { NowMs() + 10000, name };
+        UpdateTypingText();
+        m_typingTimer.Start();
+    }
+
+    void MainWindow::UpdateTypingText()
+    {
+        auto now = NowMs();
+        std::erase_if(m_typing, [now](auto const& entry) { return entry.second.first < now; });
+
+        std::vector<std::wstring const*> names;
+        for (auto const& [id, entry] : m_typing) names.push_back(&entry.second);
+
+        if (names.empty())
+        {
+            TypingText().Text(L"");
+            m_typingTimer.Stop();
+        }
+        else if (names.size() == 1)
+        {
+            TypingText().Text(*names[0] + L" est en train d'écrire…");
+        }
+        else if (names.size() == 2)
+        {
+            TypingText().Text(*names[0] + L" et " + *names[1] + L" sont en train d'écrire…");
+        }
+        else
+        {
+            TypingText().Text(L"Plusieurs personnes sont en train d'écrire…");
+        }
+    }
+
+    void MainWindow::OnComposerTextChanged(IInspectable const&, TextChangedEventArgs const&)
+    {
+        // Let others see "X est en train d'écrire…" (Discord expects one ping per ~8 s).
+        auto now = NowMs();
+        if (!m_rest || m_currentChannelId.empty() || Composer().Text().empty() || now - m_lastTypingSent < 8000)
+        {
+            return;
+        }
+        m_lastTypingSent = now;
+        m_rest->PostJson(L"/channels/" + m_currentChannelId + L"/typing", JsonObject{});
+    }
+
+    // ------------------------------------------------------------------ uploads
+
+    fire_and_forget MainWindow::OnAttach(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto strong = get_strong();
+        Microsoft::Windows::Storage::Pickers::FileOpenPicker picker{ AppWindow().Id() };
+        picker.FileTypeFilter().Append(L"*");
+        auto result = co_await picker.PickSingleFileAsync();
+        if (result)
+        {
+            UploadFile(std::wstring{ result.Path() });
+        }
+    }
+
+    fire_and_forget MainWindow::UploadFile(std::wstring path)
+    {
+        using namespace Windows::Web::Http;
+        auto strong = get_strong();
+        auto rest = m_rest;
+        auto channelId = m_currentChannelId;
+        if (!rest || channelId.empty())
+        {
+            co_return;
+        }
+
+        hstring error;
+        try
+        {
+            auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(path);
+            auto props = co_await file.GetBasicPropertiesAsync();
+            co_await wil::resume_foreground(m_dispatcher);
+            if (props.Size() > 10ull * 1024 * 1024)
+            {
+                StatusText().Text(L"Fichier trop lourd (10 Mo max sans Nitro).");
+                co_return;
+            }
+            StatusText().Text(L"Envoi de " + std::wstring{ file.Name() } + L"…");
+
+            auto text = std::wstring{ Composer().Text() };
+            Composer().Text(L"");
+
+            JsonObject attachment;
+            attachment.Insert(L"id", JsonValue::CreateStringValue(L"0"));
+            attachment.Insert(L"filename", JsonValue::CreateStringValue(file.Name()));
+            JsonArray attachments;
+            attachments.Append(attachment);
+            JsonObject payload;
+            payload.Insert(L"content", JsonValue::CreateStringValue(text));
+            payload.Insert(L"nonce", JsonValue::CreateStringValue(NowNonce()));
+            payload.Insert(L"attachments", attachments);
+
+            HttpMultipartFormDataContent form;
+            form.Add(HttpStringContent{ payload.Stringify(), Windows::Storage::Streams::UnicodeEncoding::Utf8, L"application/json" },
+                     L"payload_json");
+            HttpStreamContent content{ co_await file.OpenReadAsync() };
+            auto type = file.ContentType().empty() ? hstring{ L"application/octet-stream" } : file.ContentType();
+            content.Headers().ContentType(Headers::HttpMediaTypeHeaderValue{ type });
+            form.Add(content, L"files[0]", file.Name());
+
+            co_await rest->PostContent(L"/channels/" + channelId + L"/messages", form);
+            co_await wil::resume_foreground(m_dispatcher);
+            StatusText().Text(L"");
+        }
+        catch (hresult_error const& e)
+        {
+            error = e.message();
+        }
+        if (!error.empty())
+        {
+            auto message = std::wstring{ error };
+            co_await wil::resume_foreground(m_dispatcher);
+            StatusText().Text(L"Envoi impossible : " + message.substr(0, 80));
         }
     }
 

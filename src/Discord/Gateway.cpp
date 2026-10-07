@@ -394,3 +394,45 @@ namespace DiscordWin3::Discord
         Send(Payload(Resume, d));
     }
 }
+
+namespace DiscordWin3::Discord
+{
+    void Gateway::SendOp(int op, JsonObject d)
+    {
+        [](std::weak_ptr<Gateway> weak, int op, JsonObject d) -> fire_and_forget
+        {
+            co_await resume_background();
+            if (auto strong = weak.lock())
+            {
+                std::lock_guard guard{ strong->m_lock };
+                JsonObject p;
+                p.Insert(L"op", JsonValue::CreateNumberValue(op));
+                p.Insert(L"d", d);
+                strong->Send(p);
+            }
+        }(weak_from_this(), op, std::move(d));
+    }
+
+    void Gateway::SubscribeMemberList(std::wstring guildId, std::wstring channelId)
+    {
+        JsonArray range;
+        range.Append(JsonValue::CreateNumberValue(0));
+        range.Append(JsonValue::CreateNumberValue(99));
+        JsonArray ranges;
+        ranges.Append(range);
+        JsonObject channels;
+        channels.Insert(channelId, ranges);
+
+        JsonObject subscription;
+        subscription.Insert(L"typing", JsonValue::CreateBooleanValue(true));
+        subscription.Insert(L"activities", JsonValue::CreateBooleanValue(true));
+        subscription.Insert(L"threads", JsonValue::CreateBooleanValue(false));
+        subscription.Insert(L"channels", channels);
+
+        JsonObject subscriptions;
+        subscriptions.Insert(guildId, subscription);
+        JsonObject d;
+        d.Insert(L"subscriptions", subscriptions);
+        SendOp(37, d);
+    }
+}

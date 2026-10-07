@@ -12,11 +12,16 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Custom title bar -->
+        <!-- Title bar: current server / conversation, centered like the official client -->
         <Grid x:Name="AppTitleBar" Grid.Row="0" Background="{StaticResource RailBrush}">
-            <TextBlock Margin="16,0,0,0" VerticalAlignment="Center" FontSize="12"
-                       Foreground="{StaticResource MutedTextBrush}" Text="Discord Win3" />
-            <TextBlock x:Name="StatusText" Margin="0,0,150,0" HorizontalAlignment="Right" VerticalAlignment="Center"
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                <Border Width="16" Height="16" CornerRadius="4">
+                    <Image x:Name="TitleIcon" Stretch="UniformToFill" />
+                </Border>
+                <TextBlock x:Name="TitleText" Text="Discord Win3" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{StaticResource HeaderTextBrush}" />
+            </StackPanel>
+            <TextBlock x:Name="StatusText" Margin="16,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center"
                        FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
         </Grid>
 
@@ -25,27 +30,40 @@
             <Grid.OpacityTransition><ScalarTransition Duration="0:0:0.25" /></Grid.OpacityTransition>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="72" />
-                <ColumnDefinition Width="240" />
+                <ColumnDefinition Width="292" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-            <!-- Guild rail -->
+            <!-- Server rail -->
             <ListView x:Name="GuildList" Grid.Column="0" Background="{StaticResource RailBrush}"
                       SelectionMode="Single" SelectionChanged="OnGuildSelected" Padding="0,4,0,4"
                       ContainerContentChanging="OnGuildContainerChanging">
+                <ListView.Resources>
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="Transparent" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="Transparent" />
+                </ListView.Resources>
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="Padding" Value="0" />
                         <Setter Property="Margin" Value="0,4,0,4" />
                         <Setter Property="HorizontalContentAlignment" Value="Center" />
                         <Setter Property="MinHeight" Value="48" />
+                        <Setter Property="Background" Value="Transparent" />
                     </Style>
                 </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:GuildItem">
-                        <!-- Rounded clip is applied and animated in code (circle <-> squircle, like Discord). -->
+                        <!-- Rounded clip is applied and animated in code (circle <-> squircle). -->
                         <Grid Width="48" Height="48" ToolTipService.ToolTip="{x:Bind Name}"
-                              Background="{StaticResource ChatBrush}">
+                              Background="{StaticResource ComposerBrush}">
                             <TextBlock Text="{x:Bind Initials}" Visibility="{x:Bind InitialsVisibility}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        FontSize="15" Foreground="{StaticResource HeaderTextBrush}" />
@@ -57,79 +75,112 @@
             </ListView>
 
             <!-- Channel sidebar -->
-            <Grid Grid.Column="1" Background="{StaticResource SidebarBrush}" CornerRadius="8,0,0,0">
+            <Grid Grid.Column="1" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}"
+                  BorderThickness="1,1,1,0" CornerRadius="8,0,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="48" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="52" />
                 </Grid.RowDefinitions>
-                <Border BorderBrush="{StaticResource RailBrush}" BorderThickness="0,0,0,1">
-                    <TextBlock x:Name="GuildTitle" Margin="16,0" VerticalAlignment="Center" FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis" Foreground="{StaticResource HeaderTextBrush}" />
+                <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+                    <StackPanel Orientation="Horizontal" Margin="16,0" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock x:Name="GuildTitle" FontWeight="SemiBold" FontSize="15" MaxWidth="230"
+                                   TextTrimming="CharacterEllipsis" Foreground="{StaticResource HeaderTextBrush}" />
+                        <FontIcon Glyph="&#xE70D;" FontSize="11" Foreground="{StaticResource HeaderTextBrush}" />
+                    </StackPanel>
                 </Border>
-                <ListView x:Name="ChannelList" Grid.Row="1" SelectionMode="Single"
-                          SelectionChanged="OnChannelSelected" Padding="8,8,8,8">
+                <ListView x:Name="ChannelList" Grid.Row="1" SelectionMode="Single" IsItemClickEnabled="True"
+                          ItemClick="OnChannelClicked" SelectionChanged="OnChannelSelected" Padding="8,8,8,8">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
                             <Setter Property="Padding" Value="8,0" />
-                            <Setter Property="MinHeight" Value="32" />
+                            <Setter Property="MinHeight" Value="34" />
+                            <Setter Property="Margin" Value="0,1" />
+                            <Setter Property="CornerRadius" Value="6" />
                         </Style>
                     </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:ChannelItem">
                             <Grid Margin="{x:Bind ItemMargin}">
-                                <TextBlock Visibility="{x:Bind CategoryVisibility}" Text="{x:Bind Name}"
-                                           Margin="0,12,0,0" FontSize="11" FontWeight="SemiBold"
-                                           CharacterSpacing="40" TextTrimming="CharacterEllipsis"
-                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <StackPanel Visibility="{x:Bind CategoryVisibility}" Orientation="Horizontal" Spacing="4"
+                                            Margin="0,14,0,0">
+                                    <TextBlock Text="{x:Bind Name}" FontSize="12" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Text="{x:Bind Glyph}" FontSize="11" VerticalAlignment="Center"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </StackPanel>
                                 <StackPanel Visibility="{x:Bind ChannelVisibility}" Orientation="Horizontal" Spacing="8"
                                             Opacity="{x:Bind TextOpacity}">
-                                    <TextBlock Text="{x:Bind Glyph}" Width="16" Visibility="{x:Bind GlyphVisibility}"
+                                    <TextBlock Text="{x:Bind Glyph}" Width="18" FontSize="16" Visibility="{x:Bind GlyphVisibility}"
                                                VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
                                     <Border Visibility="{x:Bind AvatarVisibility}" Width="24" Height="24" CornerRadius="12"
                                             Background="{StaticResource ComposerBrush}" VerticalAlignment="Center">
                                         <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
                                     </Border>
-                                    <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
-                                               Foreground="{StaticResource BodyTextBrush}" />
+                                    <TextBlock Text="{x:Bind Name}" FontSize="15" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" Foreground="{StaticResource BodyTextBrush}" />
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                <Grid Grid.Row="2" Background="#232428" Padding="8,0,8,0" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="32" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <Border Width="32" Height="32" CornerRadius="16" Background="{StaticResource ComposerBrush}"
-                            VerticalAlignment="Center">
+            </Grid>
+
+            <!-- User panel (spans rail + sidebar, floating card like the 2025 client) -->
+            <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="8" Padding="8" CornerRadius="8" ColumnSpacing="10"
+                  Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="36" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid Width="36" Height="36">
+                    <Border CornerRadius="18" Background="{StaticResource ComposerBrush}">
                         <Image x:Name="SelfAvatar" Stretch="UniformToFill" />
                     </Border>
-                    <TextBlock x:Name="SelfName" Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis" Foreground="{StaticResource HeaderTextBrush}" />
-                    <Button Grid.Column="2" VerticalAlignment="Center" Click="OnLogout"
-                            ToolTipService.ToolTip="Se déconnecter" Background="Transparent" BorderThickness="0">
-                        <FontIcon Glyph="&#xF3B1;" FontSize="14" />
-                    </Button>
+                    <Ellipse x:Name="SelfStatus" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                             Fill="#23A55A" Stroke="{StaticResource PanelBrush}" StrokeThickness="2" />
                 </Grid>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock x:Name="SelfName" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                               Foreground="{StaticResource HeaderTextBrush}" />
+                    <TextBlock x:Name="SelfStatusText" FontSize="12" TextTrimming="CharacterEllipsis"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                </StackPanel>
+                <Button Grid.Column="2" VerticalAlignment="Center" Click="OnLogout"
+                        ToolTipService.ToolTip="Se déconnecter" Background="Transparent" BorderThickness="0">
+                    <FontIcon Glyph="&#xF3B1;" FontSize="16" />
+                </Button>
             </Grid>
 
             <!-- Chat area -->
-            <Grid Grid.Column="2" Background="{StaticResource ChatBrush}">
+            <Grid Grid.Column="2" Grid.RowSpan="2" Background="{StaticResource ChatBrush}"
+                  BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="48" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="24" />
                 </Grid.RowDefinitions>
-                <Border BorderBrush="{StaticResource RailBrush}" BorderThickness="0,0,0,1">
-                    <TextBlock x:Name="ChannelTitle" Margin="16,0" VerticalAlignment="Center" FontWeight="SemiBold"
-                               Foreground="{StaticResource HeaderTextBrush}" />
-                </Border>
+                <Grid BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="16,0,12,0">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock x:Name="ChannelGlyph" FontSize="20" Foreground="{StaticResource MutedTextBrush}"
+                                   VerticalAlignment="Center" />
+                        <Border x:Name="ChannelAvatarBorder" Width="24" Height="24" CornerRadius="12" Visibility="Collapsed"
+                                Background="{StaticResource ComposerBrush}">
+                            <Image x:Name="ChannelAvatar" Stretch="UniformToFill" />
+                        </Border>
+                        <TextBlock x:Name="ChannelTitle" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"
+                                   Foreground="{StaticResource HeaderTextBrush}" />
+                    </StackPanel>
+                    <ToggleButton x:Name="MembersToggle" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="True" Click="OnToggleMembers" Background="Transparent" BorderThickness="0"
+                                  ToolTipService.ToolTip="Afficher la liste des membres">
+                        <FontIcon Glyph="&#xE716;" FontSize="18" />
+                    </ToggleButton>
+                </Grid>
 
                 <ListView x:Name="MessageList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="False"
-                          Loaded="OnMessageListLoaded">
+                          Loaded="OnMessageListLoaded" ContainerContentChanging="OnMessageContainerChanging">
                     <ListView.OpacityTransition><ScalarTransition Duration="0:0:0.18" /></ListView.OpacityTransition>
                     <ListView.TranslationTransition><Vector3Transition Duration="0:0:0.22" /></ListView.TranslationTransition>
                     <ListView.ItemsPanel>
@@ -146,43 +197,141 @@
                     </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:MessageItem">
-                            <Grid Padding="{x:Bind RowPadding}" ColumnSpacing="16">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="40" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Width="40" Height="40" CornerRadius="20" VerticalAlignment="Top"
-                                        Visibility="{x:Bind HeaderVisibility}" Background="{StaticResource ComposerBrush}">
-                                    <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Spacing="2">
-                                    <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind HeaderVisibility}">
-                                        <TextBlock Text="{x:Bind AuthorName}" FontWeight="SemiBold" Foreground="{x:Bind AuthorBrush}" />
-                                        <TextBlock Text="{x:Bind Timestamp}" FontSize="12" VerticalAlignment="Bottom"
-                                                   Foreground="{StaticResource MutedTextBrush}" />
-                                    </StackPanel>
-                                    <TextBlock Text="{x:Bind Content}" Visibility="{x:Bind ContentVisibility}"
-                                               TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                               Foreground="{StaticResource BodyTextBrush}" />
-                                    <Border Visibility="{x:Bind ImageVisibility}" CornerRadius="8" HorizontalAlignment="Left"
-                                            Width="{x:Bind ImageWidth}" Height="{x:Bind ImageHeight}" Margin="0,4,0,0"
-                                            Background="{StaticResource SidebarBrush}">
-                                        <Image Source="{x:Bind Image}" Stretch="Uniform" />
+                            <StackPanel>
+                                <!-- Day separator -->
+                                <Grid Visibility="{x:Bind DayVisibility}" Margin="16,20,16,4" ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Height="1" Fill="{StaticResource LineBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind DayText}" FontSize="12" FontWeight="SemiBold"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                    <Rectangle Grid.Column="2" Height="1" Fill="{StaticResource LineBrush}" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <Grid Padding="{x:Bind RowPadding}" Background="{x:Bind RowBackground}" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="40" Height="40" CornerRadius="20" VerticalAlignment="Top"
+                                            Margin="0,2,0,0" Visibility="{x:Bind HeaderVisibility}"
+                                            Background="{StaticResource ComposerBrush}">
+                                        <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
                                     </Border>
-                                    <TextBlock Text="{x:Bind Files}" Visibility="{x:Bind FilesVisibility}"
-                                               TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="13"
-                                               Foreground="#00A8FC" />
-                                </StackPanel>
-                            </Grid>
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Text="{x:Bind ReplyText}" Visibility="{x:Bind ReplyVisibility}" FontSize="13"
+                                                   TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind HeaderVisibility}">
+                                            <TextBlock Text="{x:Bind AuthorName}" FontWeight="SemiBold" FontSize="15"
+                                                       Foreground="{x:Bind AuthorBrush}" />
+                                            <Border Visibility="{x:Bind TagVisibility}" CornerRadius="4" Padding="5,0"
+                                                    Background="#2E2F35" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind TagText}" FontSize="11" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource HeaderTextBrush}" />
+                                            </Border>
+                                            <TextBlock Text="{x:Bind Timestamp}" FontSize="12" VerticalAlignment="Center"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                        <!-- Filled in code: mentions as pills, links, custom emojis, markdown-lite -->
+                                        <RichTextBlock x:Name="Body" Visibility="{x:Bind ContentVisibility}" FontSize="15"
+                                                       TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                       Foreground="{StaticResource BodyTextBrush}" />
+                                        <Border Visibility="{x:Bind ImageVisibility}" CornerRadius="8" HorizontalAlignment="Left"
+                                                Width="{x:Bind ImageWidth}" Height="{x:Bind ImageHeight}" Margin="0,4,0,0"
+                                                Background="{StaticResource CardBrush}">
+                                            <Image Source="{x:Bind Image}" Stretch="Uniform" />
+                                        </Border>
+                                        <!-- Link preview card -->
+                                        <Grid Visibility="{x:Bind EmbedVisibility}" HorizontalAlignment="Left" MaxWidth="520"
+                                              Margin="0,4,0,0" CornerRadius="4" Background="{StaticResource CardBrush}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="4" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Rectangle Fill="{x:Bind EmbedBar}" />
+                                            <StackPanel Grid.Column="1" Padding="12,8,16,12" Spacing="4">
+                                                <TextBlock Text="{x:Bind EmbedProvider}" Visibility="{x:Bind EmbedProviderVisibility}"
+                                                           FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Text="{x:Bind EmbedTitle}" Visibility="{x:Bind EmbedTitleVisibility}"
+                                                           FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{StaticResource LinkBrush}" />
+                                                <TextBlock Text="{x:Bind EmbedDescription}" Visibility="{x:Bind EmbedDescriptionVisibility}"
+                                                           FontSize="14" TextWrapping="Wrap" MaxLines="6" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{StaticResource BodyTextBrush}" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Text="{x:Bind Files}" Visibility="{x:Bind FilesVisibility}"
+                                                   TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="14"
+                                                   Foreground="{StaticResource LinkBrush}" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
 
-                <Border Grid.Row="2" Margin="16,0,16,20" CornerRadius="8" Background="{StaticResource ComposerBrush}">
-                    <TextBox x:Name="Composer" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200"
-                             BorderThickness="0" Background="Transparent" Padding="16,11"
-                             PreviewKeyDown="OnComposerKeyDown" IsEnabled="False" />
-                </Border>
+                <!-- Composer -->
+                <Grid Grid.Row="2" Margin="16,0,16,0" CornerRadius="8" Background="{StaticResource ComposerBrush}"
+                      BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="AttachButton" Margin="8,0,0,0" VerticalAlignment="Center" Click="OnAttach" IsEnabled="False"
+                            Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="Envoyer un fichier">
+                        <FontIcon Glyph="&#xE710;" FontSize="16" />
+                    </Button>
+                    <TextBox x:Name="Composer" Grid.Column="1" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200"
+                             BorderThickness="0" Background="Transparent" Padding="8,11,16,11" FontSize="15"
+                             PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerTextChanged" IsEnabled="False" />
+                </Grid>
+                <TextBlock x:Name="TypingText" Grid.Row="3" Margin="18,2,16,0" FontSize="12" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" Foreground="{StaticResource BodyTextBrush}" />
+            </Grid>
+
+            <!-- Member list -->
+            <Grid x:Name="MembersPane" Grid.Column="3" Grid.RowSpan="2" Width="256" Background="{StaticResource SidebarBrush}"
+                  BorderBrush="{StaticResource LineBrush}" BorderThickness="1,1,0,0">
+                <ListView x:Name="MemberList" SelectionMode="None" Padding="8,8,8,8">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="Padding" Value="8,0" />
+                            <Setter Property="MinHeight" Value="0" />
+                            <Setter Property="CornerRadius" Value="6" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:MemberItem">
+                            <Grid>
+                                <TextBlock Visibility="{x:Bind GroupVisibility}" Text="{x:Bind Name}" Margin="0,16,0,4"
+                                           FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <Grid Visibility="{x:Bind MemberVisibility}" Opacity="{x:Bind RowOpacity}" Height="44"
+                                      ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Width="32" Height="32">
+                                        <Border CornerRadius="16" Background="{StaticResource ComposerBrush}">
+                                            <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
+                                        </Border>
+                                        <Ellipse Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                 Fill="{x:Bind StatusBrush}" Stroke="{StaticResource SidebarBrush}" StrokeThickness="2" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind Name}" FontSize="15" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" Foreground="{x:Bind NameBrush}" />
+                                        <TextBlock Text="{x:Bind Activity}" Visibility="{x:Bind ActivityVisibility}" FontSize="12"
+                                                   TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
             </Grid>
         </Grid>
 

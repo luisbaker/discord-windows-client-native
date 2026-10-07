@@ -62,24 +62,40 @@ namespace DiscordWin3::Discord
 
     IAsyncOperation<IJsonValue> Rest::GetJson(std::wstring path)
     {
-        return Send(HttpMethod::Get(), std::move(path), {});
+        return Send(HttpMethod::Get(), std::move(path), nullptr);
     }
 
     IAsyncOperation<IJsonValue> Rest::PostJson(std::wstring path, JsonObject body)
     {
-        return Send(HttpMethod::Post(), std::move(path), body.Stringify());
+        auto text = body.Stringify();
+        return Send(HttpMethod::Post(), std::move(path), [text]() -> IHttpContent
+        {
+            return HttpStringContent{ text, Windows::Storage::Streams::UnicodeEncoding::Utf8, L"application/json" };
+        });
     }
 
-    IAsyncOperation<IJsonValue> Rest::Send(HttpMethod method, std::wstring path, hstring body)
+    IAsyncOperation<IJsonValue> Rest::PostContent(std::wstring path, IHttpContent content)
+    {
+        // Single attempt: multipart content streams cannot be replayed.
+        bool used = false;
+        return Send(HttpMethod::Post(), std::move(path), [content, used]() mutable -> IHttpContent
+        {
+            if (used) throw hresult_error(E_FAIL, L"HTTP 429: rate limited");
+            used = true;
+            return content;
+        });
+    }
+
+    IAsyncOperation<IJsonValue> Rest::Send(HttpMethod method, std::wstring path, std::function<IHttpContent()> content)
     {
         Uri uri{ std::wstring{ ApiBase } + path };
 
         for (int attempt = 0; attempt < 3; ++attempt)
         {
             HttpRequestMessage request{ method, uri };
-            if (!body.empty())
+            if (content)
             {
-                request.Content(HttpStringContent{ body, Windows::Storage::Streams::UnicodeEncoding::Utf8, L"application/json" });
+                request.Content(content());
             }
 
             auto response = co_await m_client.SendRequestAsync(request);

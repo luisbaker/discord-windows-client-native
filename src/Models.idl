@@ -36,18 +36,46 @@ namespace DiscordWin3
         String AuthorId { get; };
         String AuthorName { get; };
         Microsoft.UI.Xaml.Media.Brush AuthorBrush { get; };
-        String Content { get; };
         String Timestamp { get; };
         Int64 UnixMs { get; };
         Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
         Microsoft.UI.Xaml.Visibility HeaderVisibility { get; };
         Microsoft.UI.Xaml.Thickness RowPadding { get; };
+        Microsoft.UI.Xaml.Media.Brush RowBackground { get; };
         Microsoft.UI.Xaml.Visibility ContentVisibility { get; };
+        Microsoft.UI.Xaml.Visibility DayVisibility { get; };
+        String DayText { get; };
+        String TagText { get; };
+        Microsoft.UI.Xaml.Visibility TagVisibility { get; };
+        String ReplyText { get; };
+        Microsoft.UI.Xaml.Visibility ReplyVisibility { get; };
         Microsoft.UI.Xaml.Media.ImageSource Image { get; };
         Microsoft.UI.Xaml.Visibility ImageVisibility { get; };
         Double ImageWidth { get; };
         Double ImageHeight { get; };
         String Files { get; };
         Microsoft.UI.Xaml.Visibility FilesVisibility { get; };
+        Microsoft.UI.Xaml.Visibility EmbedVisibility { get; };
+        Microsoft.UI.Xaml.Media.Brush EmbedBar { get; };
+        String EmbedProvider { get; };
+        Microsoft.UI.Xaml.Visibility EmbedProviderVisibility { get; };
+        String EmbedTitle { get; };
+        Microsoft.UI.Xaml.Visibility EmbedTitleVisibility { get; };
+        String EmbedDescription { get; };
+        Microsoft.UI.Xaml.Visibility EmbedDescriptionVisibility { get; };
+    }
+
+    runtimeclass MemberItem
+    {
+        Boolean IsGroup { get; };
+        String Name { get; };
+        String Activity { get; };
+        Microsoft.UI.Xaml.Media.Brush NameBrush { get; };
+        Microsoft.UI.Xaml.Media.Brush StatusBrush { get; };
+        Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
+        Double RowOpacity { get; };
+        Microsoft.UI.Xaml.Visibility GroupVisibility { get; };
+        Microsoft.UI.Xaml.Visibility MemberVisibility { get; };
+        Microsoft.UI.Xaml.Visibility ActivityVisibility { get; };
     }
 }

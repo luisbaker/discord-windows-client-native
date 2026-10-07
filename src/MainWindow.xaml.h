@@ -61,6 +61,12 @@ namespace winrt::DiscordWin3::implementation
         void OnGuildContainerChanging(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                                       Microsoft::UI::Xaml::Controls::ContainerContentChangingEventArgs const&);
         void OnChannelSelected(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void OnChannelClicked(IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
+        void OnToggleMembers(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnMessageContainerChanging(Microsoft::UI::Xaml::Controls::ListViewBase const&,
+                                        Microsoft::UI::Xaml::Controls::ContainerContentChangingEventArgs const&);
+        fire_and_forget OnAttach(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnComposerTextChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::TextChangedEventArgs const&);
         void OnLogout(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnMessageListLoaded(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnComposerKeyDown(IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
@@ -101,7 +107,11 @@ namespace winrt::DiscordWin3::implementation
         fire_and_forget LoadOlder();
         fire_and_forget SendMessage(std::wstring text);
         ::DiscordWin3::MessageData BuildMessage(Windows::Data::Json::JsonObject const& m);
-        std::wstring FormatContent(std::wstring const& raw, Windows::Data::Json::JsonObject const& m);
+        std::vector<::DiscordWin3::Segment> ParseBody(std::wstring const& raw, Windows::Data::Json::JsonObject const& m);
+        std::wstring PlainText(std::wstring const& raw, Windows::Data::Json::JsonObject const& m);
+        void RenderBody(Microsoft::UI::Xaml::Controls::RichTextBlock const& block, ::DiscordWin3::MessageData const& data);
+        std::wstring DayLabel(::DiscordWin3::MessageData const* prev, ::DiscordWin3::MessageData const& cur);
+        winrt::DiscordWin3::MessageItem MakeRow(::DiscordWin3::MessageData data, ::DiscordWin3::MessageData const* prev);
         bool ShouldShowHeader(::DiscordWin3::MessageData const* prev, ::DiscordWin3::MessageData const& cur);
         void AppendMessage(::DiscordWin3::MessageData data);
         void FixHeaderAt(uint32_t index);
@@ -113,6 +123,18 @@ namespace winrt::DiscordWin3::implementation
         void AnimateMessagesIn();
 
         void SetBackgroundMode(bool background);
+
+        // Member list sidebar (op 37 -> GUILD_MEMBER_LIST_UPDATE)
+        void SubscribeMembers();
+        void OnMemberListUpdate(Windows::Data::Json::JsonObject const& d);
+        IInspectable BuildMemberRow(Windows::Data::Json::JsonObject const& item, GuildInfo const& guild);
+
+        // Typing indicator
+        void OnTypingStart(Windows::Data::Json::JsonObject const& d);
+        void UpdateTypingText();
+
+        void UpdateTitle();
+        fire_and_forget UploadFile(std::wstring path);
 
         std::wstring m_token;
         std::shared_ptr<::DiscordWin3::Discord::Rest> m_rest;
@@ -135,12 +157,20 @@ namespace winrt::DiscordWin3::implementation
         bool m_loadingOlder = false;
         bool m_hasMoreOlder = false;
         bool m_background = false;
+        std::unordered_set<std::wstring> m_collapsed;                  // collapsed category ids
+        std::wstring m_memberListGuild;
+        std::unordered_map<std::wstring, int> m_memberGroupCounts;
+        std::unordered_map<std::wstring, std::pair<int64_t, std::wstring>> m_typing;  // userId -> (expiry ms, name)
+        Microsoft::UI::Dispatching::DispatcherQueueTimer m_typingTimer{ nullptr };
+        int64_t m_lastTypingSent = 0;
 
         Windows::Foundation::Collections::IObservableVector<IInspectable> m_guildItems =
             single_threaded_observable_vector<IInspectable>();
         Windows::Foundation::Collections::IObservableVector<IInspectable> m_channelItems =
             single_threaded_observable_vector<IInspectable>();
         Windows::Foundation::Collections::IObservableVector<IInspectable> m_messageItems =
+            single_threaded_observable_vector<IInspectable>();
+        Windows::Foundation::Collections::IObservableVector<IInspectable> m_memberItems =
             single_threaded_observable_vector<IInspectable>();
 
         Microsoft::UI::Xaml::Controls::ScrollViewer m_messageScroller{ nullptr };

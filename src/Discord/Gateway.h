@@ -27,6 +27,12 @@ namespace DiscordWin3::Discord
         // Op 8: ask for member objects (nick, guild avatar, roles) -> GUILD_MEMBERS_CHUNK.
         void RequestGuildMembers(std::wstring guildId, std::vector<std::wstring> userIds);
 
+        // Op 37: subscribe to the member list sidebar of a channel -> GUILD_MEMBER_LIST_UPDATE.
+        void SubscribeMemberList(std::wstring guildId, std::wstring channelId);
+
+        // Sends any payload from a background thread (safe to call from the UI thread).
+        void SendOp(int op, winrt::Windows::Data::Json::JsonObject d);
+
     private:
         winrt::fire_and_forget Connect(bool resume);
         void OnText(winrt::hstring const& text, uint64_t generation);

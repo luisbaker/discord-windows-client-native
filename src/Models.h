@@ -3,9 +3,28 @@
 #include "GuildItem.g.h"
 #include "ChannelItem.g.h"
 #include "MessageItem.g.h"
+#include "MemberItem.g.h"
 
 namespace DiscordWin3
 {
+    // One run of a parsed message body (markdown-lite + Discord tokens).
+    struct Segment
+    {
+        enum class Kind : uint8_t
+        {
+            Text,
+            Bold,
+            Code,       // `inline`
+            CodeBlock,  // ```block```
+            Mention,    // @user / @role / #channel pill
+            Link,
+            Emoji,      // custom emoji image, url in `url`
+        };
+        Kind kind = Kind::Text;
+        std::wstring text;
+        std::wstring url;
+    };
+
     // Plain data handed to the item constructors (kept out of the WinRT surface).
     struct MessageData
     {
@@ -13,15 +32,23 @@ namespace DiscordWin3
         std::wstring authorId;
         std::wstring authorName;
         std::wstring avatarUrl;   // already sized CDN url, empty if none
-        std::wstring content;
+        std::wstring tag;         // server tag shown next to the name ("IPv6")
+        std::vector<Segment> body;
+        std::wstring reply;       // "@name : snippet" for replies
         std::wstring timestamp;   // display string
         int64_t unixMs = 0;
         std::wstring imageUrl;    // first image attachment (proxied, resized)
         double imageWidth = 0;
         double imageHeight = 0;
         std::wstring files;       // other attachments, one per line
+        std::wstring embedProvider;
+        std::wstring embedTitle;
+        std::wstring embedDescription;
+        uint32_t embedColor = 0;
         uint32_t color = 0;       // top role color (0xRRGGBB), 0 = default
+        bool mentionsMe = false;
         bool forceHeader = false; // replies / system messages never collapse into the previous group
+        bool HasBody() const { return !body.empty(); }
     };
 }
 
@@ -29,6 +56,12 @@ namespace winrt::DiscordWin3::implementation
 {
     using Microsoft::UI::Xaml::Visibility;
     using Microsoft::UI::Xaml::Media::ImageSource;
+    using Microsoft::UI::Xaml::Media::Brush;
+
+    // Shared, cached solid brushes (UI thread only). 0 alpha byte = opaque.
+    Brush SolidBrush(uint32_t rgb, uint8_t alpha = 255);
+
+    inline Visibility Show(bool visible) { return visible ? Visibility::Visible : Visibility::Collapsed; }
 
     struct GuildItem : GuildItemT<GuildItem>
     {
@@ -38,8 +71,8 @@ namespace winrt::DiscordWin3::implementation
         hstring Name() const { return m_name; }
         hstring Initials() const { return m_initials; }
         ImageSource Icon();
-        Visibility IconVisibility() const { return m_iconUrl.empty() ? Visibility::Collapsed : Visibility::Visible; }
-        Visibility InitialsVisibility() const { return m_iconUrl.empty() ? Visibility::Visible : Visibility::Collapsed; }
+        Visibility IconVisibility() const { return Show(!m_iconUrl.empty()); }
+        Visibility InitialsVisibility() const { return Show(m_iconUrl.empty()); }
 
     private:
         hstring m_id, m_name, m_initials, m_iconUrl;
@@ -65,12 +98,12 @@ namespace winrt::DiscordWin3::implementation
         bool IsTextLike() const { return m_kind == ChannelKind::Text; }
         bool IsVoiceUser() const { return m_kind == ChannelKind::VoiceUser; }
         ImageSource Avatar();
-        Visibility AvatarVisibility() const { return m_avatarUrl.empty() ? Visibility::Collapsed : Visibility::Visible; }
-        Visibility GlyphVisibility() const { return m_avatarUrl.empty() ? Visibility::Visible : Visibility::Collapsed; }
+        Visibility AvatarVisibility() const { return Show(!m_avatarUrl.empty()); }
+        Visibility GlyphVisibility() const { return Show(m_avatarUrl.empty()); }
         Microsoft::UI::Xaml::Thickness ItemMargin() const { return { IsVoiceUser() ? 24.0 : 0.0, 0, 0, 0 }; }
         double TextOpacity() const { return IsVoiceUser() ? 0.8 : 1.0; }
-        Visibility CategoryVisibility() const { return IsCategory() ? Visibility::Visible : Visibility::Collapsed; }
-        Visibility ChannelVisibility() const { return IsCategory() ? Visibility::Collapsed : Visibility::Visible; }
+        Visibility CategoryVisibility() const { return Show(IsCategory()); }
+        Visibility ChannelVisibility() const { return Show(!IsCategory()); }
 
     private:
         hstring m_id, m_name, m_glyph;
@@ -80,32 +113,79 @@ namespace winrt::DiscordWin3::implementation
 
     struct MessageItem : MessageItemT<MessageItem>
     {
-        MessageItem(::DiscordWin3::MessageData data, bool showHeader)
-            : m_d(std::move(data)), m_showHeader(showHeader) {}
+        MessageItem(::DiscordWin3::MessageData data, bool showHeader, std::wstring dayText)
+            : m_d(std::move(data)), m_showHeader(showHeader), m_day(std::move(dayText)) {}
 
         hstring Id() const { return hstring{ m_d.id }; }
         hstring AuthorId() const { return hstring{ m_d.authorId }; }
         hstring AuthorName() const { return hstring{ m_d.authorName }; }
-        Microsoft::UI::Xaml::Media::Brush AuthorBrush();
-        hstring Content() const { return hstring{ m_d.content }; }
+        Brush AuthorBrush() const { return SolidBrush(m_d.color ? m_d.color : 0xF2F3F5); }
         hstring Timestamp() const { return hstring{ m_d.timestamp }; }
         int64_t UnixMs() const { return m_d.unixMs; }
         ImageSource Avatar();
-        Visibility HeaderVisibility() const { return m_showHeader ? Visibility::Visible : Visibility::Collapsed; }
+        Visibility HeaderVisibility() const { return Show(m_showHeader); }
         Microsoft::UI::Xaml::Thickness RowPadding() const { return { 16, m_showHeader ? 12.0 : 1.0, 16, 1 }; }
-        Visibility ContentVisibility() const { return m_d.content.empty() ? Visibility::Collapsed : Visibility::Visible; }
+        Brush RowBackground() const { return m_d.mentionsMe ? SolidBrush(0xF0B232, 0x18) : SolidBrush(0, 0); }
+        Visibility ContentVisibility() const { return Show(m_d.HasBody()); }
+        Visibility DayVisibility() const { return Show(!m_day.empty()); }
+        hstring DayText() const { return hstring{ m_day }; }
+        hstring TagText() const { return hstring{ m_d.tag }; }
+        Visibility TagVisibility() const { return Show(!m_d.tag.empty()); }
+        hstring ReplyText() const { return hstring{ m_d.reply }; }
+        Visibility ReplyVisibility() const { return Show(!m_d.reply.empty()); }
         ImageSource Image();
-        Visibility ImageVisibility() const { return m_d.imageUrl.empty() ? Visibility::Collapsed : Visibility::Visible; }
+        Visibility ImageVisibility() const { return Show(!m_d.imageUrl.empty()); }
         double ImageWidth() const { return m_d.imageWidth; }
         double ImageHeight() const { return m_d.imageHeight; }
         hstring Files() const { return hstring{ m_d.files }; }
-        Visibility FilesVisibility() const { return m_d.files.empty() ? Visibility::Collapsed : Visibility::Visible; }
+        Visibility FilesVisibility() const { return Show(!m_d.files.empty()); }
+        Visibility EmbedVisibility() const { return Show(!m_d.embedTitle.empty() || !m_d.embedDescription.empty()); }
+        Brush EmbedBar() const { return SolidBrush(m_d.embedColor ? m_d.embedColor : 0x4E5058); }
+        hstring EmbedProvider() const { return hstring{ m_d.embedProvider }; }
+        Visibility EmbedProviderVisibility() const { return Show(!m_d.embedProvider.empty()); }
+        hstring EmbedTitle() const { return hstring{ m_d.embedTitle }; }
+        Visibility EmbedTitleVisibility() const { return Show(!m_d.embedTitle.empty()); }
+        hstring EmbedDescription() const { return hstring{ m_d.embedDescription }; }
+        Visibility EmbedDescriptionVisibility() const { return Show(!m_d.embedDescription.empty()); }
 
         ::DiscordWin3::MessageData const& Data() const { return m_d; }
         bool ShowsHeader() const { return m_showHeader; }
+        std::wstring const& Day() const { return m_day; }
 
     private:
         ::DiscordWin3::MessageData m_d;
         bool m_showHeader;
+        std::wstring m_day;
+    };
+
+    struct MemberItem : MemberItemT<MemberItem>
+    {
+        // Group header row.
+        MemberItem(std::wstring groupTitle) : m_isGroup(true), m_name(std::move(groupTitle)) {}
+        // Member row. status: "online" | "idle" | "dnd" | other = offline.
+        MemberItem(std::wstring name, uint32_t color, std::wstring avatarUrl, std::wstring status, std::wstring activity)
+            : m_isGroup(false), m_name(std::move(name)), m_color(color), m_avatarUrl(std::move(avatarUrl)),
+              m_status(std::move(status)), m_activity(std::move(activity)) {}
+
+        bool IsGroup() const { return m_isGroup; }
+        hstring Name() const { return hstring{ m_name }; }
+        hstring Activity() const { return hstring{ m_activity }; }
+        Brush NameBrush() const { return SolidBrush(m_color ? m_color : 0xDBDEE1); }
+        Brush StatusBrush() const;
+        ImageSource Avatar();
+        double RowOpacity() const { return IsOffline() ? 0.4 : 1.0; }
+        Visibility GroupVisibility() const { return Show(m_isGroup); }
+        Visibility MemberVisibility() const { return Show(!m_isGroup); }
+        Visibility ActivityVisibility() const { return Show(!m_isGroup && !m_activity.empty()); }
+
+    private:
+        bool IsOffline() const { return !m_isGroup && m_status != L"online" && m_status != L"idle" && m_status != L"dnd"; }
+
+        bool m_isGroup;
+        std::wstring m_name;
+        uint32_t m_color = 0;
+        std::wstring m_avatarUrl;
+        std::wstring m_status;
+        std::wstring m_activity;
     };
 }
