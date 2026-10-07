@@ -617,5 +617,8 @@
                 </Grid>
             </Border>
         </Grid>
+
+        <!-- Video fullscreen layer (the playing video is moved here, then back) -->
+        <Grid x:Name="FullscreenHost" Grid.RowSpan="2" Visibility="Collapsed" Background="Black" />
     </Grid>
 </Window>

@@ -2232,10 +2232,14 @@ namespace winrt::DiscordWin3::implementation
             auto children = host.Children();
             for (int i = static_cast<int>(children.Size()) - 1; i >= 0; --i)
             {
-                if (auto player = children.GetAt(i).try_as<MediaPlayerElement>())
+                auto surface = children.GetAt(i).try_as<Grid>();
+                if (surface && unbox_value_or<hstring>(surface.Tag(), L"") == L"video")
                 {
-                    if (auto mp = player.MediaPlayer()) mp.Pause();
-                    player.Source(nullptr);
+                    if (auto player = surface.Children().GetAt(0).try_as<MediaPlayerElement>())
+                    {
+                        if (auto mp = player.MediaPlayer()) mp.Pause();
+                        player.Source(nullptr);
+                    }
                     children.RemoveAt(i);
                 }
             }
@@ -4626,12 +4630,189 @@ namespace winrt::DiscordWin3::implementation
         auto host = Media::VisualTreeHelper::GetParent(button).try_as<Grid>();
         if (!data || !host || data->mediaUrl.empty()) return;
 
+        // Surface = player + Discord-style control bar (the stock transport controls look out of place).
+        Grid surface;
+        surface.Tag(box_value(L"video"));
+        surface.Background(SolidBrush(0x000000));
+
         MediaPlayerElement player;
         player.Source(Windows::Media::Core::MediaSource::CreateFromUri(Uri{ data->mediaUrl }));
-        player.AreTransportControlsEnabled(true);
+        player.AreTransportControlsEnabled(false);
         player.AutoPlay(true);
         player.Stretch(Media::Stretch::Uniform);
-        host.Children().Append(player);
+        surface.Children().Append(player);
+
+        // Bottom bar on a dark gradient: play/pause, progress, time, mute, fullscreen.
+        Grid bar;
+        bar.VerticalAlignment(VerticalAlignment::Bottom);
+        bar.Padding({ 8, 18, 8, 6 });
+        bar.ColumnSpacing(6);
+        Media::LinearGradientBrush shade;
+        shade.StartPoint({ 0, 0 });
+        shade.EndPoint({ 0, 1 });
+        Media::GradientStop top, bottom;
+        top.Color(Windows::UI::Color{ 0, 0, 0, 0 });
+        top.Offset(0);
+        bottom.Color(Windows::UI::Color{ 0xCC, 0, 0, 0 });
+        bottom.Offset(1);
+        shade.GradientStops().Append(top);
+        shade.GradientStops().Append(bottom);
+        bar.Background(shade);
+        for (auto width : { GridLengthHelper::Auto(), GridLengthHelper::FromValueAndType(1, GridUnitType::Star),
+                            GridLengthHelper::Auto(), GridLengthHelper::Auto(), GridLengthHelper::Auto() })
+        {
+            ColumnDefinition c;
+            c.Width(width);
+            bar.ColumnDefinitions().Append(c);
+        }
+
+        auto iconButton = [](wchar_t const* glyph, int column)
+        {
+            Button b;
+            FontIcon icon;
+            icon.Glyph(glyph);
+            icon.FontSize(14);
+            icon.Foreground(SolidBrush(0xFFFFFF));
+            b.Content(icon);
+            b.Width(30);
+            b.Height(30);
+            b.Padding({ 0, 0, 0, 0 });
+            b.CornerRadius({ 6, 6, 6, 6 });
+            b.Background(SolidBrush(0, 0));
+            b.BorderThickness({ 0, 0, 0, 0 });
+            Grid::SetColumn(b, column);
+            return std::pair{ b, icon };
+        };
+        auto [playButton, playIcon] = iconButton(L"", 0);       // pause (it autoplays)
+        auto [muteButton, muteIcon] = iconButton(L"", 3);
+        auto [fullButton, fullIcon] = iconButton(L"", 4);
+
+        Slider progress;
+        progress.Minimum(0);
+        progress.Maximum(1);
+        progress.StepFrequency(0.1);
+        progress.IsThumbToolTipEnabled(false);
+        progress.VerticalAlignment(VerticalAlignment::Center);
+        progress.Resources().Insert(box_value(L"SliderTrackValueFill"), SolidBrush(0x5865F2));
+        progress.Resources().Insert(box_value(L"SliderTrackValueFillPointerOver"), SolidBrush(0x5865F2));
+        progress.Resources().Insert(box_value(L"SliderTrackValueFillPressed"), SolidBrush(0x5865F2));
+        progress.Resources().Insert(box_value(L"SliderTrackFill"), SolidBrush(0xFFFFFF, 0x4D));
+        progress.Resources().Insert(box_value(L"SliderThumbBackground"), SolidBrush(0xFFFFFF));
+        Grid::SetColumn(progress, 1);
+
+        TextBlock time;
+        time.FontSize(12);
+        time.Foreground(SolidBrush(0xFFFFFF));
+        time.VerticalAlignment(VerticalAlignment::Center);
+        time.Text(L"0:00");
+        Grid::SetColumn(time, 2);
+
+        bar.Children().Append(playButton);
+        bar.Children().Append(progress);
+        bar.Children().Append(time);
+        bar.Children().Append(muteButton);
+        bar.Children().Append(fullButton);
+        surface.Children().Append(bar);
+
+        auto session = player.MediaPlayer().PlaybackSession();
+        auto updating = std::make_shared<bool>(false);
+        auto format = [](double seconds)
+        {
+            int s = static_cast<int>(seconds);
+            wchar_t buf[16];
+            swprintf_s(buf, L"%d:%02d", s / 60, s % 60);
+            return std::wstring{ buf };
+        };
+
+        // 4 Hz UI refresh while the surface lives; stops itself once the row recycled it.
+        auto timer = m_dispatcher.CreateTimer();
+        timer.Interval(std::chrono::milliseconds(250));
+        weak_ref<Grid> weakSurface{ surface };
+        timer.Tick([weakSurface, session, progress, time, playIcon, updating, format](Microsoft::UI::Dispatching::DispatcherQueueTimer const& t, auto&&)
+        {
+            auto s = weakSurface.get();
+            if (!s || !Media::VisualTreeHelper::GetParent(s))
+            {
+                t.Stop();
+                return;
+            }
+            double position = std::chrono::duration<double>(session.Position()).count();
+            double duration = std::chrono::duration<double>(session.NaturalDuration()).count();
+            *updating = true;
+            if (duration > 0) progress.Maximum(duration);
+            progress.Value(position);
+            *updating = false;
+            time.Text(format(position) + L" / " + format(duration));
+            bool playing = session.PlaybackState() == Windows::Media::Playback::MediaPlaybackState::Playing;
+            playIcon.Glyph(playing ? L"" : L"");
+        });
+        timer.Start();
+
+        progress.ValueChanged([session, updating](auto&&, Primitives::RangeBaseValueChangedEventArgs const& e)
+        {
+            if (!*updating)
+                session.Position(std::chrono::duration_cast<TimeSpan>(std::chrono::duration<double>(e.NewValue())));
+        });
+        playButton.Click([player](auto&&, auto&&)
+        {
+            auto mp = player.MediaPlayer();
+            if (mp.PlaybackSession().PlaybackState() == Windows::Media::Playback::MediaPlaybackState::Playing) mp.Pause();
+            else mp.Play();
+        });
+        muteButton.Click([player, muteIcon](auto&&, auto&&)
+        {
+            auto mp = player.MediaPlayer();
+            mp.IsMuted(!mp.IsMuted());
+            muteIcon.Glyph(mp.IsMuted() ? L"" : L"");
+        });
+
+        // Fullscreen: move the surface to the window-wide layer and switch the window presenter.
+        fullButton.Click([weak = get_weak(), weakSurface, fullIcon](auto&&, auto&&)
+        {
+            auto self = weak.get();
+            auto s = weakSurface.get();
+            if (!self || !s) return;
+            using Microsoft::UI::Windowing::AppWindowPresenterKind;
+            auto layer = self->FullscreenHost();
+            if (layer.Visibility() == Visibility::Collapsed)
+            {
+                self->m_videoHome = Media::VisualTreeHelper::GetParent(s).try_as<Panel>();
+                if (self->m_videoHome)
+                {
+                    uint32_t index;
+                    if (self->m_videoHome.Children().IndexOf(s, index)) self->m_videoHome.Children().RemoveAt(index);
+                }
+                layer.Children().Append(s);
+                layer.Visibility(Visibility::Visible);
+                self->AppWindow().SetPresenter(AppWindowPresenterKind::FullScreen);
+                fullIcon.Glyph(L"");
+            }
+            else
+            {
+                layer.Children().Clear();
+                layer.Visibility(Visibility::Collapsed);
+                if (self->m_videoHome) self->m_videoHome.Children().Append(s);
+                self->m_videoHome = nullptr;
+                self->AppWindow().SetPresenter(AppWindowPresenterKind::Overlapped);
+                fullIcon.Glyph(L"");
+            }
+        });
+
+        // Controls fade in on hover (always visible while paused).
+        bar.Opacity(1);
+        surface.PointerEntered([bar](auto&&, auto&&) { bar.Opacity(1); });
+        surface.PointerExited([bar, session](auto&&, auto&&)
+        {
+            if (session.PlaybackState() == Windows::Media::Playback::MediaPlaybackState::Playing) bar.Opacity(0);
+        });
+        if (!m_reduceMotion)
+        {
+            ScalarTransition fade;
+            fade.Duration(std::chrono::milliseconds(150));
+            bar.OpacityTransition(fade);
+        }
+
+        host.Children().Append(surface);
         button.Visibility(Visibility::Collapsed);
     }
 

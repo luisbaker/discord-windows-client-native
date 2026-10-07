@@ -270,6 +270,7 @@ namespace winrt::DiscordWin3::implementation
         bool m_notificationsReady = false;
         std::wstring m_pendingOpenGuild, m_pendingOpenChannel;
         Microsoft::UI::Xaml::Controls::MenuFlyout m_messageMenu{ nullptr };
+        Microsoft::UI::Xaml::Controls::Panel m_videoHome{ nullptr };   // where a fullscreen video came from
 
         struct Presence { std::wstring status; std::wstring activity; std::wstring game; bool hasActivity = false; };
         std::unordered_map<std::wstring, Presence> m_presence;            // userId -> presence (friends + DMs)
