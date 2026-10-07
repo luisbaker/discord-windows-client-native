@@ -53,6 +53,8 @@ namespace DiscordWin3
         std::wstring timestamp;   // display string
         int64_t unixMs = 0;
         std::wstring imageUrl;    // first image attachment (proxied, resized)
+        std::wstring mediaUrl;    // full-size original (download / video playback)
+        bool isVideo = false;
         double imageWidth = 0;
         double imageHeight = 0;
         std::wstring files;       // other attachments, one per line
@@ -61,6 +63,7 @@ namespace DiscordWin3
         std::wstring embedDescription;
         uint32_t embedColor = 0;
         uint32_t color = 0;       // top role color (0xRRGGBB), 0 = default
+        bool own = false;          // written by the logged-in user
         bool mentionsMe = false;
         bool forceHeader = false; // replies / system messages never collapse into the previous group
         bool HasBody() const { return !body.empty(); }
@@ -202,6 +205,8 @@ namespace winrt::DiscordWin3::implementation
         Brush RowBackground() const { return m_d.mentionsMe ? SolidBrush(0xF0B232, 0x18) : SolidBrush(0, 0); }
         Visibility ContentVisibility() const { return Show(m_d.HasBody()); }
         Visibility ReactionsVisibility() const { return Show(!m_d.reactions.empty()); }
+        Visibility OwnVisibility() const { return Show(m_d.own); }
+        Visibility OthersVisibility() const { return Show(!m_d.own); }
         Visibility DayVisibility() const { return Show(!m_day.empty()); }
         hstring DayText() const { return hstring{ m_day }; }
         hstring TagText() const { return hstring{ m_d.tag }; }
@@ -210,6 +215,7 @@ namespace winrt::DiscordWin3::implementation
         Visibility ReplyVisibility() const { return Show(!m_d.reply.empty()); }
         ImageSource Image();
         Visibility ImageVisibility() const { return Show(!m_d.imageUrl.empty()); }
+        Visibility VideoVisibility() const { return Show(m_d.isVideo); }
         double ImageWidth() const { return m_d.imageWidth; }
         double ImageHeight() const { return m_d.imageHeight; }
         hstring Files() const { return hstring{ m_d.files }; }

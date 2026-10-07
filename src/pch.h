@@ -20,6 +20,8 @@
 #include <winrt/Windows.Storage.FileProperties.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Microsoft.Windows.Storage.Pickers.h>
+#include <winrt/Windows.Media.Core.h>
+#include <winrt/Windows.Media.Playback.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.System.Threading.h>
 #include <winrt/Windows.Web.Http.h>

@@ -2,6 +2,7 @@
 #include "RemoteAuth.h"
 #include "Json.h"
 #include "Rest.h"
+#include "../Strings.h"
 
 using namespace winrt;
 using namespace Windows::Data::Json;
@@ -110,7 +111,7 @@ namespace DiscordWin3::Discord
             }
             if (!finished)
             {
-                strong->m_cb.onError(L"Session QR fermée (code " + std::to_wstring(args.Code()) + L").");
+                strong->m_cb.onError(I18n::Fmt(I18n::S::QrClosed, std::to_wstring(args.Code())));
             }
         });
 
@@ -129,7 +130,7 @@ namespace DiscordWin3::Discord
         }
         catch (hresult_error const& e)
         {
-            m_cb.onError(L"Connexion QR impossible : " + std::wstring{ e.message() });
+            m_cb.onError(I18n::Fmt(I18n::S::QrConnectFailed, std::wstring{ e.message() }));
         }
     }
 
@@ -230,7 +231,7 @@ namespace DiscordWin3::Discord
         }
         else if (op == L"cancel")
         {
-            m_cb.onError(L"Connexion annulée sur le téléphone.");
+            m_cb.onError(I18n::Tr(I18n::S::QrCancelled));
         }
     }
 
@@ -253,7 +254,7 @@ namespace DiscordWin3::Discord
         }
         catch (hresult_error const& e)
         {
-            m_cb.onError(L"Échec de la validation du QR : " + std::wstring{ e.message() });
+            m_cb.onError(I18n::Fmt(I18n::S::QrValidateFailed, std::wstring{ e.message() }));
         }
     }
 }

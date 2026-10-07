@@ -116,7 +116,7 @@
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="30" Padding="8,0"
                                 Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" CornerRadius="8"
                                 ToolTipService.ToolTip="Ctrl+K">
-                            <TextBlock Text="Recherche ou lance une conversation" FontSize="13" FontWeight="SemiBold"
+                            <TextBlock x:Name="QuickSwitchText" Text="Recherche ou lance une conversation" FontSize="13" FontWeight="SemiBold"
                                        Foreground="{StaticResource BodyTextBrush}" />
                         </Button>
                     </Grid>
@@ -128,11 +128,11 @@
                             Background="Transparent">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <FontIcon Glyph="&#xE716;" FontSize="18" />
-                            <TextBlock Text="Amis" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock x:Name="FriendsNavText" Text="Amis" FontSize="15" FontWeight="SemiBold" />
                         </StackPanel>
                     </Button>
                     <Rectangle Height="1" Fill="{StaticResource LineBrush}" Margin="8,4" />
-                    <TextBlock Text="Messages privés" Margin="8,4,0,0" FontSize="13" FontWeight="SemiBold"
+                    <TextBlock x:Name="DmHeaderText" Text="Messages privés" Margin="8,4,0,0" FontSize="13" FontWeight="SemiBold"
                                Foreground="{StaticResource MutedTextBrush}" />
                 </StackPanel>
                 <ListView x:Name="ChannelList" Grid.Row="2" SelectionMode="Single" IsItemClickEnabled="True"
@@ -207,14 +207,15 @@
                     <TextBlock x:Name="SelfStatusText" FontSize="12" TextTrimming="CharacterEllipsis"
                                Foreground="{StaticResource MutedTextBrush}" />
                 </StackPanel>
-                <Button Grid.Column="2" VerticalAlignment="Center" Click="OnLogout"
-                        ToolTipService.ToolTip="Se déconnecter" Background="Transparent" BorderThickness="0">
-                    <FontIcon Glyph="&#xF3B1;" FontSize="16" />
+                <Button x:Name="SettingsButton" Grid.Column="2" VerticalAlignment="Center" Click="OnSettings"
+                        ToolTipService.ToolTip="Paramètres" Background="Transparent" BorderThickness="0">
+                    <FontIcon Glyph="&#xE713;" FontSize="16" />
                 </Button>
             </Grid>
 
             <!-- Chat area -->
-            <Grid Grid.Column="2" Grid.RowSpan="2" Background="{StaticResource ChatBrush}"
+            <Grid x:Name="ChatArea" Grid.Column="2" Grid.RowSpan="2" Background="{StaticResource ChatBrush}"
+                  AllowDrop="True" DragOver="OnChatDragOver" Drop="OnChatDrop"
                   BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="48" />
@@ -300,11 +301,22 @@
                                         <RichTextBlock x:Name="Body" Visibility="{x:Bind ContentVisibility}" FontSize="15"
                                                        TextWrapping="Wrap" IsTextSelectionEnabled="True"
                                                        Foreground="{StaticResource BodyTextBrush}" />
-                                        <Border Visibility="{x:Bind ImageVisibility}" CornerRadius="8" HorizontalAlignment="Left"
-                                                Width="{x:Bind ImageWidth}" Height="{x:Bind ImageHeight}" Margin="0,4,0,0"
-                                                Background="{StaticResource CardBrush}">
+                                        <!-- Image or video poster; the video player is only created on ▶ (RAM) -->
+                                        <Grid x:Name="MediaHost" Visibility="{x:Bind ImageVisibility}" CornerRadius="8" HorizontalAlignment="Left"
+                                              Width="{x:Bind ImageWidth}" Height="{x:Bind ImageHeight}" Margin="0,4,0,0"
+                                              Background="{StaticResource CardBrush}">
                                             <Image Source="{x:Bind Image}" Stretch="Uniform" />
-                                        </Border>
+                                            <Button Visibility="{x:Bind VideoVisibility}" Click="OnPlayVideo" Width="56" Height="56"
+                                                    CornerRadius="28" Padding="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                    Background="#B3000000" BorderThickness="0">
+                                                <FontIcon Glyph="&#xF5B0;" FontSize="22" Foreground="White" />
+                                            </Button>
+                                            <Button x:Name="DownloadButton" Click="OnDownloadMedia" Width="32" Height="32" Padding="0"
+                                                    CornerRadius="6" Margin="8" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                    Background="#B3000000" BorderThickness="0">
+                                                <FontIcon Glyph="&#xE896;" FontSize="14" Foreground="White" />
+                                            </Button>
+                                        </Grid>
                                         <!-- Link preview card -->
                                         <Grid Visibility="{x:Bind EmbedVisibility}" HorizontalAlignment="Left" MaxWidth="520"
                                               Margin="0,4,0,0" CornerRadius="4" Background="{StaticResource CardBrush}">
@@ -330,6 +342,32 @@
                                         <StackPanel x:Name="Reactions" Visibility="{x:Bind ReactionsVisibility}"
                                                     Orientation="Horizontal" Spacing="4" Margin="0,4,0,0" />
                                     </StackPanel>
+                                    <!-- Hover action bar (shown on pointer over), like the official client -->
+                                    <Border x:Name="HoverBar" Grid.ColumnSpan="2" Visibility="Collapsed" HorizontalAlignment="Right"
+                                            VerticalAlignment="Top" Margin="0,-6,0,0" Padding="2" CornerRadius="8"
+                                            Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button x:Name="Quick0" Click="OnHoverReaction" Style="{StaticResource HoverButton}" FontSize="17" />
+                                            <Button x:Name="Quick1" Click="OnHoverReaction" Style="{StaticResource HoverButton}" FontSize="17" />
+                                            <Button x:Name="Quick2" Click="OnHoverReaction" Style="{StaticResource HoverButton}" FontSize="17" />
+                                            <Rectangle Width="1" Height="20" Margin="4,0" Fill="{StaticResource LineBrush}" />
+                                            <Button x:Name="HoverPicker" Click="OnHoverPicker" Style="{StaticResource HoverButton}">
+                                                <FontIcon Glyph="&#xE76E;" FontSize="16" />
+                                            </Button>
+                                            <Button x:Name="HoverEdit" Click="OnHoverEdit" Visibility="{x:Bind OwnVisibility}" Style="{StaticResource HoverButton}">
+                                                <FontIcon Glyph="&#xE70F;" FontSize="16" />
+                                            </Button>
+                                            <Button x:Name="HoverReply" Click="OnHoverReply" Visibility="{x:Bind OthersVisibility}" Style="{StaticResource HoverButton}">
+                                                <FontIcon Glyph="&#xE97A;" FontSize="16" />
+                                            </Button>
+                                            <Button x:Name="HoverForward" Click="OnHoverForward" Style="{StaticResource HoverButton}">
+                                                <FontIcon Glyph="&#xE72D;" FontSize="16" />
+                                            </Button>
+                                            <Button x:Name="HoverMore" Click="OnHoverMore" Style="{StaticResource HoverButton}">
+                                                <FontIcon Glyph="&#xE712;" FontSize="16" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
                                 </Grid>
                             </StackPanel>
                         </DataTemplate>
@@ -342,28 +380,42 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <!-- "Réponse à X" / "Modification" bar -->
-                    <Grid x:Name="ReplyBar" Grid.ColumnSpan="2" Visibility="Collapsed" Padding="16,6,8,6"
+                    <Grid x:Name="ReplyBar" Grid.ColumnSpan="3" Visibility="Collapsed" Padding="16,6,8,6"
                           Background="#1D1E22" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
                         <TextBlock x:Name="ReplyText" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                    Foreground="{StaticResource MutedTextBrush}" Margin="0,0,40,0" />
-                        <Button HorizontalAlignment="Right" Click="OnCancelReply" Padding="6,2" Background="Transparent"
+                        <Button x:Name="CancelReplyButton" HorizontalAlignment="Right" Click="OnCancelReply" Padding="6,2" Background="Transparent"
                                 BorderThickness="0" ToolTipService.ToolTip="Annuler (Échap)">
                             <FontIcon Glyph="&#xE711;" FontSize="12" />
                         </Button>
                     </Grid>
-                    <Button x:Name="AttachButton" Grid.Row="1" Margin="8,0,0,0" VerticalAlignment="Center" Click="OnAttach" IsEnabled="False"
+                    <!-- Files waiting to be sent (preview cards with edit / remove) -->
+                    <ScrollViewer x:Name="PendingScroller" Grid.Row="1" Grid.ColumnSpan="3" Visibility="Collapsed"
+                                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                  HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"
+                                  BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+                        <StackPanel x:Name="PendingPanel" Orientation="Horizontal" Spacing="16" Padding="16,20,16,12" />
+                    </ScrollViewer>
+                    <Button x:Name="AttachButton" Grid.Row="2" Margin="8,0,0,0" VerticalAlignment="Center" Click="OnAttach" IsEnabled="False"
                             Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="Envoyer un fichier">
                         <FontIcon Glyph="&#xE710;" FontSize="16" />
                     </Button>
-                    <TextBox x:Name="Composer" Grid.Row="1" Grid.Column="1" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200"
+                    <TextBox x:Name="Composer" Grid.Row="2" Grid.Column="1" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200"
                              BorderThickness="0" Background="Transparent" Padding="8,11,16,11" FontSize="15"
-                             PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerTextChanged" IsEnabled="False" />
+                             PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerTextChanged" Paste="OnComposerPaste"
+                             IsEnabled="False" />
+                    <Button x:Name="ComposerEmojiButton" Grid.Row="2" Grid.Column="2" Margin="0,0,8,0" VerticalAlignment="Center"
+                            Click="OnComposerEmoji" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="Choisir un emoji">
+                        <FontIcon Glyph="&#xE76E;" FontSize="18" />
+                    </Button>
                 </Grid>
                 <TextBlock x:Name="TypingText" Grid.Row="3" Margin="18,2,16,0" FontSize="12" FontWeight="SemiBold"
                            TextTrimming="CharacterEllipsis" Foreground="{StaticResource BodyTextBrush}" />
@@ -378,7 +430,7 @@
                     <Grid BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="16,0">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <FontIcon Glyph="&#xE716;" FontSize="18" Foreground="{StaticResource MutedTextBrush}" />
-                            <TextBlock Text="Amis" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"
+                            <TextBlock x:Name="FriendsTitleText" Text="Amis" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"
                                        Foreground="{StaticResource HeaderTextBrush}" Margin="0,0,8,0" />
                             <Ellipse Width="4" Height="4" Fill="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
                             <Button x:Name="TabOnline" Content="En ligne" Tag="online" Click="OnFriendsTab" Padding="10,4"
@@ -396,8 +448,8 @@
                     <StackPanel Grid.Row="1" Padding="24,16,24,8" Spacing="8">
                         <TextBox x:Name="FriendsSearch" PlaceholderText="Rechercher" TextChanged="OnFriendsSearchChanged" />
                         <StackPanel x:Name="AddFriendPanel" Visibility="Collapsed" Spacing="8">
-                            <TextBlock Text="Ajouter" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource HeaderTextBrush}" />
-                            <TextBlock Text="Tu peux ajouter des amis grâce à leur nom d'utilisateur Discord." FontSize="14"
+                            <TextBlock x:Name="AddFriendTitle" Text="Ajouter" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource HeaderTextBrush}" />
+                            <TextBlock x:Name="AddFriendHintText" Text="Tu peux ajouter des amis grâce à leur nom d'utilisateur Discord." FontSize="14"
                                        Foreground="{StaticResource MutedTextBrush}" />
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
@@ -405,7 +457,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBox x:Name="AddFriendBox" PlaceholderText="Tu peux ajouter des amis grâce à leur nom d'utilisateur." />
-                                <Button Grid.Column="1" Content="Envoyer une demande d'ami" Click="OnSendFriendRequest"
+                                <Button x:Name="SendFriendRequestButton" Grid.Column="1" Content="Envoyer une demande d'ami" Click="OnSendFriendRequest"
                                         Style="{StaticResource AccentButtonStyle}" />
                             </Grid>
                             <TextBlock x:Name="AddFriendResult" FontSize="13" TextWrapping="Wrap" />
@@ -532,11 +584,11 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Spacing="12" VerticalAlignment="Center">
-                        <TextBlock Text="Ha, te revoilà !" FontSize="24" FontWeight="SemiBold"
+                        <TextBlock x:Name="LoginWelcomeText" Text="Ha, te revoilà !" FontSize="24" FontWeight="SemiBold"
                                    HorizontalAlignment="Center" Foreground="{StaticResource HeaderTextBrush}" />
-                        <TextBlock Text="Client natif WinUI 3 — sans Electron." HorizontalAlignment="Center"
+                        <TextBlock x:Name="LoginSubtitleText" Text="Client natif WinUI 3 — sans Electron." HorizontalAlignment="Center"
                                    Foreground="{StaticResource MutedTextBrush}" />
-                        <TextBlock Text="TOKEN (option avancée)" Margin="0,16,0,0" FontSize="12" FontWeight="SemiBold"
+                        <TextBlock x:Name="LoginTokenLabel" Text="TOKEN (option avancée)" Margin="0,16,0,0" FontSize="12" FontWeight="SemiBold"
                                    Foreground="{StaticResource MutedTextBrush}" />
                         <PasswordBox x:Name="TokenBox" PlaceholderText="Colle ton token ici" />
                         <Button x:Name="TokenLoginButton" Content="Connexion" HorizontalAlignment="Stretch"

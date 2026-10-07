@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "MainWindow.g.h"
 #include "Models.h"
@@ -37,6 +37,8 @@ namespace winrt::DiscordWin3::implementation
         ::DiscordWin3::Discord::GuildPermissions perms;
         std::unordered_map<uint64_t, RoleStyle> roles;
         std::unordered_map<std::wstring, std::wstring> voice;   // userId -> voice channelId
+        struct Emoji { std::wstring id, name; };
+        std::vector<Emoji> emojis;                              // custom emojis (picker)
     };
 
     // Kept tiny on purpose: only what the UI shows.
@@ -75,6 +77,19 @@ namespace winrt::DiscordWin3::implementation
         void OnQrRetry(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnCancelReply(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnNavigateBack(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnSettings(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnPlayVideo(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        fire_and_forget OnDownloadMedia(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnHoverReaction(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnHoverPicker(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnHoverEdit(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnHoverReply(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnHoverForward(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnHoverMore(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnComposerEmoji(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        fire_and_forget OnComposerPaste(IInspectable const&, Microsoft::UI::Xaml::Controls::TextControlPasteEventArgs const&);
+        void OnChatDragOver(IInspectable const&, Microsoft::UI::Xaml::DragEventArgs const&);
+        fire_and_forget OnChatDrop(IInspectable const&, Microsoft::UI::Xaml::DragEventArgs const&);
         void OnNavigateForward(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         fire_and_forget OnQuickSwitch(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnShowFriends(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -192,11 +207,26 @@ namespace winrt::DiscordWin3::implementation
         void UpdateNavButtons();
         void UpdateTitleBarRegions();
 
+        // Translations
+        void ApplyTexts();
+
+        // Attachments waiting to be sent
+        struct PendingAttachment { std::wstring path, filename, description; bool spoiler = false; bool image = false; uint64_t size = 0; };
+        fire_and_forget StageFile(std::wstring path, std::wstring displayName = {});
+        void RenderPending();
+        fire_and_forget EditPending(size_t index);
+        fire_and_forget SendWithAttachments(std::wstring text, std::wstring replyToId);
+
+        // Hover bar, emoji picker, forwarding
+        void ShowEmojiPicker(Microsoft::UI::Xaml::FrameworkElement const& anchor, std::function<void(::DiscordWin3::Reaction const&)> onPick);
+        void RememberEmoji(std::wstring const& emoji);
+        fire_and_forget ForwardMessage(::DiscordWin3::MessageData data);
+        ::DiscordWin3::MessageData const* MessageFromSender(IInspectable const& sender);
+
         // Notifications
         void InitNotifications();
         void Notify(::DiscordWin3::MessageData const& data, std::wstring const& channelId, std::wstring const& guildId);
         void OpenChannel(std::wstring const& guildId, std::wstring const& channelId);
-        fire_and_forget UploadFile(std::wstring path);
 
         std::wstring m_token;
         std::shared_ptr<::DiscordWin3::Discord::Rest> m_rest;
@@ -253,6 +283,8 @@ namespace winrt::DiscordWin3::implementation
         std::vector<std::pair<std::wstring, std::wstring>> m_history;      // (guild, channel)
         size_t m_historyIndex = 0;
         bool m_navigatingHistory = false;
+        std::vector<PendingAttachment> m_pending;
+        std::vector<std::wstring> m_recentEmojis{ L"\U0001F44D", L"\u2764\uFE0F", L"\U0001F602" };   // thumbs up, heart, joy
         std::wstring m_ackChannel, m_ackMessage;
         bool m_ackScheduled = false;
 

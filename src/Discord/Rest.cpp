@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Rest.h"
 #include "Json.h"
+#include "../Strings.h"
 
 using namespace winrt;
 using namespace Windows::Data::Json;
@@ -53,7 +54,7 @@ namespace DiscordWin3::Discord
         auto headers = m_client.DefaultRequestHeaders();
         headers.UserAgent().TryParseAdd(UserAgent());
         headers.TryAppendWithoutValidation(L"X-Super-Properties", SuperPropertiesBase64());
-        headers.TryAppendWithoutValidation(L"X-Discord-Locale", L"fr");
+        headers.TryAppendWithoutValidation(L"X-Discord-Locale", I18n::DiscordLocale(I18n::Current()));
         if (!m_token.empty())
         {
             headers.TryAppendWithoutValidation(L"Authorization", m_token);

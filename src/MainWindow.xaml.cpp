@@ -7,9 +7,12 @@
 #include "Discord/Json.h"
 #include "ImageCache.h"
 #include "TokenStore.h"
+#include "Strings.h"
 #include "third_party/qrcodegen.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -19,6 +22,7 @@ using namespace Windows::Foundation;
 namespace Json = ::DiscordWin3::Json;
 namespace Discord = ::DiscordWin3::Discord;
 using ::DiscordWin3::MessageData;
+namespace I18n = ::DiscordWin3::I18n;
 
 namespace winrt::DiscordWin3::implementation
 {
@@ -111,11 +115,11 @@ namespace winrt::DiscordWin3::implementation
             wchar_t buf[64];
             if (delta == 0)
             {
-                swprintf_s(buf, L"Aujourd'hui à %02d:%02d", local.wHour, local.wMinute);
+                swprintf_s(buf, L"%02d:%02d", local.wHour, local.wMinute); return I18n::Fmt(I18n::S::TodayAt, buf);
             }
             else if (delta == 1)
             {
-                swprintf_s(buf, L"Hier à %02d:%02d", local.wHour, local.wMinute);
+                swprintf_s(buf, L"%02d:%02d", local.wHour, local.wMinute); return I18n::Fmt(I18n::S::YesterdayAt, buf);
             }
             else
             {
@@ -128,16 +132,16 @@ namespace winrt::DiscordWin3::implementation
         {
             SYSTEMTIME local = ToLocal(unixMs);
             wchar_t buf[96]{};
-            GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_LONGDATE, &local, nullptr, buf, 96, nullptr);
+            GetDateFormatEx(I18n::LocaleName(I18n::Current()), DATE_LONGDATE, &local, nullptr, buf, 96, nullptr);
             return buf;
         }
 
         std::wstring StatusLabel(std::wstring const& status)
         {
-            if (status == L"idle") return L"Inactif";
-            if (status == L"dnd") return L"Ne pas déranger";
-            if (status == L"invisible" || status == L"offline") return L"Invisible";
-            return L"En ligne";
+            if (status == L"idle") return I18n::Tr(I18n::S::StatusIdle);
+            if (status == L"dnd") return I18n::Tr(I18n::S::StatusDnd);
+            if (status == L"invisible" || status == L"offline") return I18n::Tr(I18n::S::StatusInvisible);
+            return I18n::Tr(I18n::S::StatusOnline);
         }
 
         uint32_t StatusColor(std::wstring const& status)
@@ -163,11 +167,11 @@ namespace winrt::DiscordWin3::implementation
                 switch (static_cast<int>(Json::Num(o, L"type", -1)))
                 {
                 case 4: if (auto state = Json::Str(o, L"state"); !state.empty()) return state; break;
-                case 0: if (fallback.empty()) fallback = L"Joue à " + name; break;
-                case 1: if (fallback.empty()) fallback = L"Streame " + name; break;
-                case 2: if (fallback.empty()) fallback = L"Écoute " + (name == L"Spotify" ? Json::Str(o, L"details") : name); break;
-                case 3: if (fallback.empty()) fallback = L"Regarde " + name; break;
-                case 5: if (fallback.empty()) fallback = L"Participe à " + name; break;
+                case 0: if (fallback.empty()) fallback = I18n::Fmt(I18n::S::Playing, name); break;
+                case 1: if (fallback.empty()) fallback = I18n::Fmt(I18n::S::Streaming, name); break;
+                case 2: if (fallback.empty()) fallback = I18n::Fmt(I18n::S::Listening, name == L"Spotify" ? Json::Str(o, L"details") : name); break;
+                case 3: if (fallback.empty()) fallback = I18n::Fmt(I18n::S::Watching, name); break;
+                case 5: if (fallback.empty()) fallback = I18n::Fmt(I18n::S::Competing, name); break;
                 }
             }
             return fallback;
@@ -237,6 +241,8 @@ namespace winrt::DiscordWin3::implementation
     void MainWindow::InitializeComponent()
     {
         MainWindowT::InitializeComponent();
+        I18n::Initialize();
+        ApplyTexts();
 
         m_dispatcher = DispatcherQueue();
         ExtendsContentIntoTitleBar(true);
@@ -565,8 +571,8 @@ namespace winrt::DiscordWin3::implementation
         QrImage().Source(nullptr);
         QrProgress().IsActive(true);
         QrRetry().Visibility(Visibility::Collapsed);
-        QrTitle().Text(L"Se connecter avec un code QR");
-        QrHint().Text(L"Scanne ce code avec l'application mobile Discord pour te connecter instantanément.");
+        QrTitle().Text(I18n::Tr(I18n::S::QrTitle));
+        QrHint().Text(I18n::Tr(I18n::S::QrHint));
 
         auto weak = get_weak();
         auto dq = m_dispatcher;
@@ -587,8 +593,8 @@ namespace winrt::DiscordWin3::implementation
         {
             post([user](MainWindow* w)
             {
-                w->QrTitle().Text(L"Regarde ton téléphone !");
-                w->QrHint().Text(L"Connexion en tant que " + user + L" — confirme sur l'appli mobile.");
+                w->QrTitle().Text(I18n::Tr(I18n::S::QrCheckPhone));
+                w->QrHint().Text(I18n::Fmt(I18n::S::QrConfirmAs, user));
                 w->QrImage().Opacity(0.15);
             });
         };
@@ -610,7 +616,7 @@ namespace winrt::DiscordWin3::implementation
                 }
                 w->QrProgress().IsActive(false);
                 w->QrImage().Opacity(0);
-                w->QrTitle().Text(L"Code expiré");
+                w->QrTitle().Text(I18n::Tr(I18n::S::QrExpired));
                 w->QrHint().Text(message);
                 w->QrRetry().Visibility(Visibility::Visible);
             });
@@ -670,7 +676,7 @@ namespace winrt::DiscordWin3::implementation
         token.erase(std::remove_if(token.begin(), token.end(), [](wchar_t c) { return c == L' ' || c == L'"' || c == L'\r' || c == L'\n'; }), token.end());
         if (token.empty())
         {
-            LoginError().Text(L"Entre un token.");
+            LoginError().Text(I18n::Tr(I18n::S::LoginNeedToken));
             return;
         }
         TokenBox().Password(L"");
@@ -707,7 +713,7 @@ namespace winrt::DiscordWin3::implementation
         m_token = std::move(token);
         m_rest = std::make_shared<Discord::Rest>(m_token);
         ShowChat();
-        GuildTitle().Text(L"Chargement…");
+        GuildTitle().Text(I18n::Tr(I18n::S::Loading));
 
         auto weak = get_weak();
         auto dq = m_dispatcher;
@@ -788,14 +794,14 @@ namespace winrt::DiscordWin3::implementation
     {
         switch (status)
         {
-        case Discord::GatewayStatus::Connecting: StatusText().Text(L"Connexion…"); break;
-        case Discord::GatewayStatus::Reconnecting: StatusText().Text(L"Reconnexion…"); break;
+        case Discord::GatewayStatus::Connecting: StatusText().Text(I18n::Tr(I18n::S::Connecting)); break;
+        case Discord::GatewayStatus::Reconnecting: StatusText().Text(I18n::Tr(I18n::S::Reconnecting)); break;
         case Discord::GatewayStatus::Connected: StatusText().Text(L""); break;
         case Discord::GatewayStatus::AuthFailed:
             m_saveTokenOnReady = false;
             ::DiscordWin3::TokenStore::Clear();
             EndSession();
-            ShowLogin(L"Token invalide ou expiré. Reconnecte-toi.");
+            ShowLogin(I18n::Tr(I18n::S::LoginInvalidToken));
             break;
         }
     }
@@ -1039,7 +1045,7 @@ namespace winrt::DiscordWin3::implementation
         }
 
         auto name = Json::Str(c, L"name");
-        info.name = !name.empty() ? name : (joined.empty() ? L"Groupe sans nom" : joined);
+        info.name = !name.empty() ? name : (joined.empty() ? std::wstring{ I18n::Tr(I18n::S::UnnamedGroup) } : joined);
 
         auto icon = Json::Str(c, L"icon");
         if (info.type == 3)
@@ -1144,6 +1150,14 @@ namespace winrt::DiscordWin3::implementation
             }
         }
 
+        if (auto emojis = Json::Arr(g, L"emojis"))
+        {
+            for (auto const& e : emojis)
+            {
+                if (e.ValueType() == JsonValueType::Object && Json::Bool(e.GetObject(), L"available", true))
+                    guild.emojis.push_back({ Json::Str(e.GetObject(), L"id"), Json::Str(e.GetObject(), L"name") });
+            }
+        }
         ParseVoiceStates(guild, Json::Arr(g, L"voice_states"));
         return guild;
     }
@@ -1312,7 +1326,7 @@ namespace winrt::DiscordWin3::implementation
         std::vector<IInspectable> items;
         items.reserve(m_guilds.size() + 1);
         auto [homeUnread, homeMentions] = HomeBadge();
-        items.push_back(make<GuildItem>(HomeId, L"Messages privés", L"", false, homeMentions));
+        items.push_back(make<GuildItem>(HomeId, I18n::Tr(I18n::S::DirectMessages), L"", false, homeMentions));
         for (auto const& g : m_guilds)
         {
             items.push_back(MakeGuildItem(g));
@@ -1335,7 +1349,7 @@ namespace winrt::DiscordWin3::implementation
 
         if (m_currentGuildId == HomeId)
         {
-            GuildTitle().Text(L"Messages privés");
+            GuildTitle().Text(I18n::Tr(I18n::S::DirectMessages));
             std::vector<ChannelInfo const*> dms;
             dms.reserve(m_dms.size());
             for (auto const& c : m_dms) dms.push_back(&c);
@@ -1495,7 +1509,7 @@ namespace winrt::DiscordWin3::implementation
         {
             if (!item.IsCategory() && !item.IsVoiceUser())
             {
-                StatusText().Text(L"Les appels vocaux arrivent dans une prochaine version.");
+                StatusText().Text(I18n::Tr(I18n::S::VoiceSoon));
             }
             // Keep the highlight on the channel that is actually open.
             for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
@@ -1518,8 +1532,8 @@ namespace winrt::DiscordWin3::implementation
         ChannelAvatar().Source(hasAvatar ? item.Avatar() : nullptr);
         ShowFriends(false);
         LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Name() });
-        Composer().PlaceholderText(L"Envoyer un message " + std::wstring{ m_currentGuildId == HomeId ? L"à @" : L"dans #" }
-                                   + std::wstring{ item.Name() });
+        Composer().PlaceholderText(I18n::Fmt(m_currentGuildId == HomeId ? I18n::S::SendMessageTo : I18n::S::SendMessageIn,
+                                               std::wstring{ item.Name() }));
         UpdateTitle();
     }
 
@@ -1559,7 +1573,7 @@ namespace winrt::DiscordWin3::implementation
         if (m_currentGuildId == HomeId)
         {
             auto name = ChannelTitle().Text();
-            TitleText().Text(name.empty() ? hstring{ L"Messages privés" } : name);
+            TitleText().Text(name.empty() ? hstring{ I18n::Tr(I18n::S::DirectMessages) } : name);
             TitleIcon().Source(ChannelAvatar().Source());
             return;
         }
@@ -1731,7 +1745,7 @@ namespace winrt::DiscordWin3::implementation
             MessageData info;
             info.authorName = L"Discord Win3";
             info.body.push_back({ ::DiscordWin3::Segment::Kind::Text,
-                message.starts_with(L"HTTP 403") ? L"Tu n'as pas accès à ce salon." : L"Erreur de chargement : " + message });
+                message.starts_with(L"HTTP 403") ? std::wstring{ I18n::Tr(I18n::S::NoAccess) } : I18n::Fmt(I18n::S::LoadError, message) });
             AppendMessage(std::move(info));
         }
         AnimateMessagesIn();
@@ -1830,7 +1844,7 @@ namespace winrt::DiscordWin3::implementation
         {
             text.pop_back();
         }
-        if (!text.empty())
+        if (!text.empty() || !m_pending.empty())
         {
             Composer().Text(L"");
             SendMessage(std::move(text));
@@ -1850,6 +1864,11 @@ namespace winrt::DiscordWin3::implementation
         auto editingId = m_editingId;
         auto replyToId = m_replyToId;
         ClearComposerMode();
+        if (!m_pending.empty() && editingId.empty())
+        {
+            SendWithAttachments(text, replyToId);
+            co_return;
+        }
 
         JsonObject body;
         body.Insert(L"content", JsonValue::CreateStringValue(text));
@@ -1883,7 +1902,7 @@ namespace winrt::DiscordWin3::implementation
         {
             auto message = std::wstring{ error };
             co_await wil::resume_foreground(m_dispatcher);
-            StatusText().Text(L"Envoi impossible : " + message.substr(0, 80));
+            StatusText().Text(I18n::Fmt(I18n::S::SendFailed, message.substr(0, 80)));
             if (Composer().Text().empty() && m_currentChannelId == channelId)
             {
                 Composer().Text(text);
@@ -1993,7 +2012,7 @@ namespace winrt::DiscordWin3::implementation
                     {
                         auto it = m_roleNames.find(std::wstring{ tag.substr(2) });
                         flush();
-                        push(Kind::Mention, L"@" + (it != m_roleNames.end() ? it->second : std::wstring{ L"rôle" }));
+                        push(Kind::Mention, L"@" + (it != m_roleNames.end() ? it->second : std::wstring{ I18n::Tr(I18n::S::RoleWord) }));
                     }
                     else if (tag.starts_with(L"@"))
                     {
@@ -2006,13 +2025,13 @@ namespace winrt::DiscordWin3::implementation
                         if (name.empty()) if (auto it = mentions.find(id); it != mentions.end()) name = it->second;
                         if (name.empty()) if (auto it = m_users.find(id); it != m_users.end()) name = it->second.name;
                         flush();
-                        push(Kind::Mention, L"@" + (name.empty() ? std::wstring{ L"utilisateur" } : name));
+                        push(Kind::Mention, L"@" + (name.empty() ? std::wstring{ I18n::Tr(I18n::S::UnknownUser) } : name));
                     }
                     else if (tag.starts_with(L"#"))
                     {
                         auto it = m_channelNames.find(std::wstring{ tag.substr(1) });
                         flush();
-                        push(Kind::Mention, L"#" + (it != m_channelNames.end() ? it->second : std::wstring{ L"salon-inconnu" }));
+                        push(Kind::Mention, L"#" + (it != m_channelNames.end() ? it->second : std::wstring{ I18n::Tr(I18n::S::UnknownChannel) }));
                     }
                     else if (tag.starts_with(L":") || tag.starts_with(L"a:"))
                     {
@@ -2207,6 +2226,20 @@ namespace winrt::DiscordWin3::implementation
         {
             return;
         }
+        // A video player never survives its row: stop and drop it (decoder + buffers are heavy).
+        if (auto host = root.FindName(L"MediaHost").try_as<Grid>())
+        {
+            auto children = host.Children();
+            for (int i = static_cast<int>(children.Size()) - 1; i >= 0; --i)
+            {
+                if (auto player = children.GetAt(i).try_as<MediaPlayerElement>())
+                {
+                    if (auto mp = player.MediaPlayer()) mp.Pause();
+                    player.Source(nullptr);
+                    children.RemoveAt(i);
+                }
+            }
+        }
         if (args.InRecycleQueue())
         {
             body.Blocks().Clear();   // release inline images of rows scrolled away
@@ -2217,8 +2250,42 @@ namespace winrt::DiscordWin3::implementation
         {
             RenderReactions(reactions, Impl(args.Item())->Data());
         }
+        if (auto bar = root.FindName(L"HoverBar").try_as<UIElement>())
+        {
+            bar.Visibility(Visibility::Collapsed);   // recycled rows start hidden
+        }
         if (!root.ContextFlyout())
         {
+            // First time this row container is used: hover bar + tooltips (containers are recycled, so once is enough).
+            weak_ref<FrameworkElement> weakRoot{ root };
+            root.PointerEntered([weak = get_weak(), weakRoot](IInspectable const&, Input::PointerRoutedEventArgs const&)
+            {
+                auto self = weak.get();
+                auto r = weakRoot.get();
+                if (!self || !r) return;
+                if (auto b = r.FindName(L"HoverBar").try_as<UIElement>()) b.Visibility(Visibility::Visible);
+                for (int i = 0; i < 3; ++i)
+                {
+                    auto quick = r.FindName(L"Quick" + std::to_wstring(i)).try_as<Button>();
+                    if (quick && i < static_cast<int>(self->m_recentEmojis.size())) quick.Content(box_value(self->m_recentEmojis[i]));
+                }
+            });
+            root.PointerExited([weakRoot](IInspectable const&, Input::PointerRoutedEventArgs const&)
+            {
+                if (auto r = weakRoot.get())
+                {
+                    if (auto b = r.FindName(L"HoverBar").try_as<UIElement>()) b.Visibility(Visibility::Collapsed);
+                }
+            });
+            auto tip = [&](wchar_t const* name, I18n::S key)
+            {
+                if (auto e = root.FindName(name).try_as<DependencyObject>()) ToolTipService::SetToolTip(e, box_value(I18n::Tr(key)));
+            };
+            tip(L"HoverPicker", I18n::S::AddReaction);
+            tip(L"HoverEdit", I18n::S::Edit);
+            tip(L"HoverReply", I18n::S::Reply);
+            tip(L"HoverForward", I18n::S::ForwardAction);
+            tip(L"HoverMore", I18n::S::More);
             root.ContextFlyout(m_messageMenu);
         }
     }
@@ -2233,6 +2300,7 @@ namespace winrt::DiscordWin3::implementation
 
         auto author = Json::Obj(m, L"author");
         data.authorId = Json::Str(author, L"id");
+        data.own = !data.authorId.empty() && data.authorId == m_selfId;
         if (!Json::Str(m, L"webhook_id").empty())
         {
             data.authorName = UserDisplayName(author);
@@ -2291,6 +2359,18 @@ namespace winrt::DiscordWin3::implementation
             }
         }
         data.body = ParseBody(Json::Str(m, L"content"), m);
+
+        // Forwarded message (2024): the content lives in message_snapshots[0].message.
+        if (auto snapshots = Json::Arr(m, L"message_snapshots"); snapshots && snapshots.Size() > 0
+            && snapshots.GetAt(0).ValueType() == JsonValueType::Object)
+        {
+            auto snapshot = Json::Obj(snapshots.GetAt(0).GetObject(), L"message");
+            data.reply = I18n::Tr(I18n::S::Forwarded);
+            data.body = ParseBody(Json::Str(snapshot, L"content"), snapshot);
+            data.forceHeader = true;
+            if (auto attachments = Json::Arr(snapshot, L"attachments")) m.Insert(L"attachments", attachments);
+            if (auto embeds = Json::Arr(snapshot, L"embeds")) m.Insert(L"embeds", embeds);
+        }
         auto system = [&](std::wstring text)
         {
             data.body = { { Kind::Text, std::move(text) } };
@@ -2299,9 +2379,9 @@ namespace winrt::DiscordWin3::implementation
 
         switch (static_cast<int>(Json::Num(m, L"type")))
         {
-        case 7: system(L"→ a rejoint le serveur."); break;
-        case 6: system(L"📌 a épinglé un message."); break;
-        case 8: case 9: case 10: case 11: system(L"🚀 a boosté le serveur !"); break;
+        case 7: system(I18n::Tr(I18n::S::SysJoined)); break;
+        case 6: system(I18n::Tr(I18n::S::SysPinned)); break;
+        case 8: case 9: case 10: case 11: system(I18n::Tr(I18n::S::SysBoost)); break;
         case 19:
             if (auto ref = Json::Obj(m, L"referenced_message"))
             {
@@ -2339,7 +2419,21 @@ namespace winrt::DiscordWin3::implementation
                 if (contentType.starts_with(L"image/") &&
                     setImage(Json::Str(o, L"proxy_url"), Json::Num(o, L"width"), Json::Num(o, L"height")))
                 {
+                    data.mediaUrl = Json::Str(o, L"url");
                     continue;
+                }
+                if (contentType.starts_with(L"video/") && data.imageUrl.empty())
+                {
+                    // Poster frame from the media proxy; the actual video only streams when played.
+                    auto proxy = Json::Str(o, L"proxy_url");
+                    auto poster = proxy + (proxy.find(L'?') == std::wstring::npos ? L"?" : L"&") + L"format=jpeg";
+                    double w = Json::Num(o, L"width", 640), h = Json::Num(o, L"height", 360);
+                    if (setImage(poster, w, h))
+                    {
+                        data.mediaUrl = Json::Str(o, L"url");
+                        data.isVideo = true;
+                        continue;
+                    }
                 }
                 data.files += (data.files.empty() ? L"" : L"\n") + (L"📎 " + Json::Str(o, L"filename") + L"  " + Json::Str(o, L"url"));
             }
@@ -2375,13 +2469,13 @@ namespace winrt::DiscordWin3::implementation
             for (auto const& s : stickers)
             {
                 if (s.ValueType() == JsonValueType::Object)
-                    data.body.push_back({ Kind::Text, (data.body.empty() ? L"" : L"\n") + (L"[Sticker : " + Json::Str(s.GetObject(), L"name") + L"]") });
+                    data.body.push_back({ Kind::Text, (data.body.empty() ? L"" : L"\n") + I18n::Fmt(I18n::S::StickerLabel, Json::Str(s.GetObject(), L"name")) });
             }
         }
 
         if (Json::Get(m, L"edited_timestamp") && !data.body.empty())
         {
-            data.body.push_back({ Kind::Text, L" (modifié)" });
+            data.body.push_back({ Kind::Text, I18n::Tr(I18n::S::Edited) });
         }
         return data;
     }
@@ -2461,11 +2555,11 @@ namespace winrt::DiscordWin3::implementation
         if (auto group = Json::Obj(item, L"group"))
         {
             auto id = Json::Str(group, L"id");
-            std::wstring title = id == L"online" ? L"En ligne" : id == L"offline" ? L"Hors ligne" : L"";
+            std::wstring title = id == L"online" ? I18n::Tr(I18n::S::StatusOnline) : id == L"offline" ? I18n::Tr(I18n::S::StatusOffline) : L"";
             if (title.empty())
             {
                 auto it = m_roleNames.find(id);
-                title = it != m_roleNames.end() ? it->second : L"Rôle";
+                title = it != m_roleNames.end() ? it->second : std::wstring{ I18n::Tr(I18n::S::RoleTitle) };
             }
             int count = static_cast<int>(Json::Num(group, L"count", -1));
             if (count < 0) { auto it = m_memberGroupCounts.find(id); count = it != m_memberGroupCounts.end() ? it->second : 0; }
@@ -2580,7 +2674,7 @@ namespace winrt::DiscordWin3::implementation
         if (name.empty())
         {
             auto it = m_users.find(userId);
-            name = it != m_users.end() ? it->second.name : L"Quelqu'un";
+            name = it != m_users.end() ? it->second.name : std::wstring{ I18n::Tr(I18n::S::Someone) };
         }
         m_typing[userId] = { NowMs() + 10000, name };
         UpdateTypingText();
@@ -2602,15 +2696,15 @@ namespace winrt::DiscordWin3::implementation
         }
         else if (names.size() == 1)
         {
-            TypingText().Text(*names[0] + L" est en train d'écrire…");
+            TypingText().Text(I18n::Fmt(I18n::S::TypingOne, *names[0]));
         }
         else if (names.size() == 2)
         {
-            TypingText().Text(*names[0] + L" et " + *names[1] + L" sont en train d'écrire…");
+            TypingText().Text(I18n::Fmt(I18n::S::TypingTwo, *names[0], *names[1]));
         }
         else
         {
-            TypingText().Text(L"Plusieurs personnes sont en train d'écrire…");
+            TypingText().Text(I18n::Tr(I18n::S::TypingMany));
         }
     }
 
@@ -2636,68 +2730,7 @@ namespace winrt::DiscordWin3::implementation
         auto result = co_await picker.PickSingleFileAsync();
         if (result)
         {
-            UploadFile(std::wstring{ result.Path() });
-        }
-    }
-
-    fire_and_forget MainWindow::UploadFile(std::wstring path)
-    {
-        using namespace Windows::Web::Http;
-        auto strong = get_strong();
-        auto rest = m_rest;
-        auto channelId = m_currentChannelId;
-        if (!rest || channelId.empty())
-        {
-            co_return;
-        }
-
-        hstring error;
-        try
-        {
-            auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(path);
-            auto props = co_await file.GetBasicPropertiesAsync();
-            co_await wil::resume_foreground(m_dispatcher);
-            if (props.Size() > 20ull * 1024 * 1024)
-            {
-                StatusText().Text(L"Fichier trop lourd (20 Mo max sans Nitro).");
-                co_return;
-            }
-            StatusText().Text(L"Envoi de " + std::wstring{ file.Name() } + L"…");
-
-            auto text = std::wstring{ Composer().Text() };
-            Composer().Text(L"");
-
-            JsonObject attachment;
-            attachment.Insert(L"id", JsonValue::CreateStringValue(L"0"));
-            attachment.Insert(L"filename", JsonValue::CreateStringValue(file.Name()));
-            JsonArray attachments;
-            attachments.Append(attachment);
-            JsonObject payload;
-            payload.Insert(L"content", JsonValue::CreateStringValue(text));
-            payload.Insert(L"nonce", JsonValue::CreateStringValue(NowNonce()));
-            payload.Insert(L"attachments", attachments);
-
-            HttpMultipartFormDataContent form;
-            form.Add(HttpStringContent{ payload.Stringify(), Windows::Storage::Streams::UnicodeEncoding::Utf8, L"application/json" },
-                     L"payload_json");
-            HttpStreamContent content{ co_await file.OpenReadAsync() };
-            auto type = file.ContentType().empty() ? hstring{ L"application/octet-stream" } : file.ContentType();
-            content.Headers().ContentType(Headers::HttpMediaTypeHeaderValue{ type });
-            form.Add(content, L"files[0]", file.Name());
-
-            co_await rest->PostContent(L"/channels/" + channelId + L"/messages", form);
-            co_await wil::resume_foreground(m_dispatcher);
-            StatusText().Text(L"");
-        }
-        catch (hresult_error const& e)
-        {
-            error = e.message();
-        }
-        if (!error.empty())
-        {
-            auto message = std::wstring{ error };
-            co_await wil::resume_foreground(m_dispatcher);
-            StatusText().Text(L"Envoi impossible : " + message.substr(0, 80));
+            StageFile(std::wstring{ result.Path() });
         }
     }
 
@@ -2827,7 +2860,7 @@ namespace winrt::DiscordWin3::implementation
             IInspectable item{ nullptr };
             if (guildId == HomeId)
             {
-                item = make<GuildItem>(HomeId, L"Messages privés", L"", false, HomeBadge().second);
+                item = make<GuildItem>(HomeId, I18n::Tr(I18n::S::DirectMessages), L"", false, HomeBadge().second);
             }
             else if (auto guild = FindGuild(guildId))
             {
@@ -3046,6 +3079,7 @@ namespace winrt::DiscordWin3::implementation
         auto channelId = m_currentChannelId;
         if (!rest || channelId.empty()) co_return;
 
+        if (!reaction.me && reaction.id.empty()) RememberEmoji(reaction.name);
         auto key = std::wstring{ Uri::EscapeComponent(reaction.ApiKey()) };
         auto path = L"/channels/" + channelId + L"/messages/" + messageId + L"/reactions/" + key + L"/@me";
         try
@@ -3134,7 +3168,7 @@ namespace winrt::DiscordWin3::implementation
 
         // Quick reactions, like the hover bar of the official client.
         MenuFlyoutSubItem react;
-        react.Text(L"Ajouter une réaction");
+        react.Text(I18n::Tr(I18n::S::AddReaction));
         FontIcon reactIcon;
         reactIcon.Glyph(L"");
         react.Icon(reactIcon);
@@ -3158,9 +3192,10 @@ namespace winrt::DiscordWin3::implementation
 
         if (own)
         {
-            add(L"Modifier le message", L"", [data](MainWindow* w) { w->StartEdit(data); });
+            add(I18n::Tr(I18n::S::EditMessage), L"", [data](MainWindow* w) { w->StartEdit(data); });
         }
-        add(L"Répondre", L"", [data](MainWindow* w) { w->StartReply(data); });
+        add(I18n::Tr(I18n::S::Reply), L"", [data](MainWindow* w) { w->StartReply(data); });
+        add(I18n::Tr(I18n::S::ForwardAction), L"", [data](MainWindow* w) { w->ForwardMessage(data); });
 
         flyout.Items().Append(MenuFlyoutSeparator{});
         auto copy = [](std::wstring const& text)
@@ -3169,18 +3204,18 @@ namespace winrt::DiscordWin3::implementation
             package.SetText(text);
             Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(package);
         };
-        add(L"Copier le texte", L"", [data, copy](MainWindow*) { copy(data.rawContent); });
-        add(L"Copier le lien du message", L"", [data, copy](MainWindow* w)
+        add(I18n::Tr(I18n::S::CopyText), L"", [data, copy](MainWindow*) { copy(data.rawContent); });
+        add(I18n::Tr(I18n::S::CopyLink), L"", [data, copy](MainWindow* w)
         {
             auto guild = w->m_currentGuildId == HomeId ? std::wstring{ L"@me" } : w->m_currentGuildId;
             copy(L"https://discord.com/channels/" + guild + L"/" + w->m_currentChannelId + L"/" + data.id);
         });
-        add(L"Copier l'identifiant", L"", [data, copy](MainWindow*) { copy(data.id); });
+        add(I18n::Tr(I18n::S::CopyId), L"", [data, copy](MainWindow*) { copy(data.id); });
 
         if (own)
         {
             flyout.Items().Append(MenuFlyoutSeparator{});
-            add(L"Supprimer le message", L"", [data](MainWindow* w) { w->DeleteMessage(data.id); }, 0xF23F43);
+            add(I18n::Tr(I18n::S::DeleteMessage), L"", [data](MainWindow* w) { w->DeleteMessage(data.id); }, 0xF23F43);
         }
     }
 
@@ -3188,7 +3223,7 @@ namespace winrt::DiscordWin3::implementation
     {
         m_editingId.clear();
         m_replyToId = data.id;
-        ReplyText().Text(L"Réponse à @" + data.authorName);
+        ReplyText().Text(I18n::Fmt(I18n::S::ReplyingTo, data.authorName));
         ReplyBar().Visibility(Visibility::Visible);
         Composer().Focus(FocusState::Programmatic);
     }
@@ -3197,7 +3232,7 @@ namespace winrt::DiscordWin3::implementation
     {
         m_replyToId.clear();
         m_editingId = data.id;
-        ReplyText().Text(L"Modification du message — Échap pour annuler, Entrée pour enregistrer");
+        ReplyText().Text(I18n::Tr(I18n::S::EditingHint));
         ReplyBar().Visibility(Visibility::Visible);
         Composer().Text(data.rawContent);
         Composer().Focus(FocusState::Programmatic);
@@ -3239,9 +3274,9 @@ namespace winrt::DiscordWin3::implementation
 
         ContentDialog dialog;
         dialog.XamlRoot(Content().XamlRoot());
-        dialog.Title(box_value(L"Supprimer le message"));
-        dialog.Content(box_value(L"Tu es sûr de vouloir supprimer ce message ?"));
-        dialog.PrimaryButtonText(L"Supprimer");
+        dialog.Title(box_value(I18n::Tr(I18n::S::DeleteMessage)));
+        dialog.Content(box_value(I18n::Tr(I18n::S::DeleteConfirm)));
+        dialog.PrimaryButtonText(I18n::Tr(I18n::S::Delete));
         dialog.CloseButtonText(L"Annuler");
         dialog.DefaultButton(ContentDialogButton::Close);
         if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || !m_rest) co_return;
@@ -3318,7 +3353,7 @@ namespace winrt::DiscordWin3::implementation
         }
         std::wstring text;
         for (auto const& s : data.body) text += s.text;
-        if (text.empty()) text = data.imageUrl.empty() ? L"Pièce jointe" : L"Image";
+        if (text.empty()) text = data.imageUrl.empty() ? I18n::Tr(I18n::S::Attachment) : I18n::Tr(I18n::S::ImageWord);
         if (text.size() > 200) text = text.substr(0, 200) + L"…";
 
         try
@@ -3472,10 +3507,10 @@ namespace winrt::DiscordWin3::implementation
         if (it != m_presence.end() && !it->second.activity.empty()) return it->second.activity;
         if (!fallbackToStatus) return {};
         auto status = it == m_presence.end() ? std::wstring{} : it->second.status;
-        if (status == L"online") return L"En ligne";
-        if (status == L"idle") return L"Inactif";
-        if (status == L"dnd") return L"Ne pas déranger";
-        return L"Hors ligne";
+        if (status == L"online") return I18n::Tr(I18n::S::StatusOnline);
+        if (status == L"idle") return I18n::Tr(I18n::S::StatusIdle);
+        if (status == L"dnd") return I18n::Tr(I18n::S::StatusDnd);
+        return I18n::Tr(I18n::S::StatusOffline);
     }
 
     // ------------------------------------------------------------------ home: friends page
@@ -3503,7 +3538,7 @@ namespace winrt::DiscordWin3::implementation
         UpdateTypingText();
         ClearComposerMode();
         ChannelList().SelectedIndex(-1);
-        TitleText().Text(L"Amis");
+        TitleText().Text(I18n::Tr(I18n::S::Friends));
         TitleIcon().Source(nullptr);
         MembersPane().Visibility(Visibility::Visible);
         RefreshFriends();
@@ -3553,7 +3588,7 @@ namespace winrt::DiscordWin3::implementation
             std::wstring name = !r.nickname.empty() ? r.nickname : user != m_users.end() ? user->second.name : id;
             if (!filter.empty() && lower(name).find(filter) == std::wstring::npos) continue;
 
-            std::wstring subtitle = isPending ? (r.type == 3 ? L"Demande d'ami reçue" : L"Demande d'ami envoyée")
+            std::wstring subtitle = isPending ? std::wstring{ I18n::Tr(r.type == 3 ? I18n::S::FriendIncoming : I18n::S::FriendOutgoing) }
                                               : PresenceText(id, true);
             auto tag = m_userTags.find(id);
             rows.push_back({ lower(name), make<FriendItem>(id, name, tag != m_userTags.end() ? tag->second : L"", subtitle,
@@ -3567,7 +3602,7 @@ namespace winrt::DiscordWin3::implementation
         for (auto& r : rows) items.push_back(std::move(r.item));
         m_friendItems.ReplaceAll(items);
 
-        std::wstring label = m_friendsTab == L"online" ? L"En ligne" : m_friendsTab == L"all" ? L"Tous les amis" : L"En attente";
+        std::wstring label = I18n::Tr(m_friendsTab == L"online" ? I18n::S::StatusOnline : m_friendsTab == L"all" ? I18n::S::AllFriends : I18n::S::TabPending);
         FriendsCount().Text(label + L" — " + std::to_wstring(items.size()));
     }
 
@@ -3575,7 +3610,7 @@ namespace winrt::DiscordWin3::implementation
     {
         // Right column on the friends page: friends currently playing / listening / watching.
         std::vector<IInspectable> items;
-        items.push_back(make<MemberItem>(std::wstring{ L"Actifs maintenant" }));
+        items.push_back(make<MemberItem>(std::wstring{ I18n::Tr(I18n::S::ActiveNow) }));
         for (auto const& [id, r] : m_relationships)
         {
             if (r.type != 1) continue;
@@ -3589,7 +3624,7 @@ namespace winrt::DiscordWin3::implementation
         }
         if (items.size() == 1)
         {
-            items.push_back(make<MemberItem>(std::wstring{ L"C'est calme pour le moment…" }));
+            items.push_back(make<MemberItem>(std::wstring{ I18n::Tr(I18n::S::QuietNow) }));
         }
         m_memberListGuild.clear();
         m_memberItems.ReplaceAll(items);
@@ -3640,15 +3675,15 @@ namespace winrt::DiscordWin3::implementation
         if (message.empty())
         {
             AddFriendResult().Foreground(SolidBrush(0x23A55A));
-            AddFriendResult().Text(L"Ta demande d'ami a été envoyée à " + username + L".");
+            AddFriendResult().Text(I18n::Fmt(I18n::S::FriendRequestSent, username));
             AddFriendBox().Text(L"");
         }
         else
         {
             AddFriendResult().Foreground(SolidBrush(0xF23F43));
             AddFriendResult().Text(message.find(L"captcha") != std::wstring::npos
-                ? L"Discord demande une vérification (captcha) : envoie cette demande depuis l'appli officielle."
-                : L"Hum, ça n'a pas marché. Vérifie le nom d'utilisateur.");
+                ? I18n::Tr(I18n::S::FriendRequestCaptcha)
+                : I18n::Tr(I18n::S::FriendRequestFailed));
         }
     }
 
@@ -3682,9 +3717,9 @@ namespace winrt::DiscordWin3::implementation
             auto user = m_users.find(id);
             ContentDialog dialog;
             dialog.XamlRoot(Content().XamlRoot());
-            dialog.Title(box_value(L"Retirer « " + (user != m_users.end() ? user->second.name : id) + L" »"));
-            dialog.Content(box_value(L"Tu es sûr de vouloir retirer cette personne de tes amis ?"));
-            dialog.PrimaryButtonText(L"Retirer l'ami");
+            dialog.Title(box_value(I18n::Fmt(I18n::S::RemoveFriendTitle, user != m_users.end() ? user->second.name : id)));
+            dialog.Content(box_value(I18n::Tr(I18n::S::RemoveFriendConfirm)));
+            dialog.PrimaryButtonText(I18n::Tr(I18n::S::RemoveFriend));
             dialog.CloseButtonText(L"Annuler");
             dialog.DefaultButton(ContentDialogButton::Close);
             if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
@@ -3762,15 +3797,15 @@ namespace winrt::DiscordWin3::implementation
         }
 
         AutoSuggestBox box;
-        box.PlaceholderText(L"Où veux-tu aller ?");
+        box.PlaceholderText(I18n::Tr(I18n::S::QuickSwitchPlaceholder));
         box.Width(460);
         auto matches = std::make_shared<std::vector<Target const*>>();
 
         ContentDialog dialog;
         dialog.XamlRoot(Content().XamlRoot());
-        dialog.Title(box_value(L"Rechercher ou lancer une conversation"));
+        dialog.Title(box_value(I18n::Tr(I18n::S::QuickSwitch)));
         dialog.Content(box);
-        dialog.CloseButtonText(L"Fermer");
+        dialog.CloseButtonText(I18n::Tr(I18n::S::Close));
 
         box.TextChanged([targets, matches, lower](AutoSuggestBox const& sender, AutoSuggestBoxTextChangedEventArgs const& args)
         {
@@ -3871,5 +3906,772 @@ namespace winrt::DiscordWin3::implementation
                                            static_cast<int32_t>(bounds.Width * scale), static_cast<int32_t>(bounds.Height * scale) };
         auto source = Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(AppWindow().Id());
         source.SetRegionRects(Microsoft::UI::Input::NonClientRegionKind::Passthrough, { rect });
+    }
+
+    // ------------------------------------------------------------------ translations
+
+    void MainWindow::ApplyTexts()
+    {
+        using I18n::S;
+        using I18n::Tr;
+        auto tip = [](DependencyObject const& o, S key) { ToolTipService::SetToolTip(o, box_value(Tr(key))); };
+
+        LoginWelcomeText().Text(Tr(S::LoginWelcome));
+        LoginSubtitleText().Text(Tr(S::LoginSubtitle));
+        LoginTokenLabel().Text(Tr(S::LoginTokenLabel));
+        TokenBox().PlaceholderText(Tr(S::LoginTokenPlaceholder));
+        TokenLoginButton().Content(box_value(Tr(S::LoginButton)));
+        QrTitle().Text(Tr(S::QrTitle));
+        QrHint().Text(Tr(S::QrHint));
+        QrRetry().Content(box_value(Tr(S::QrRetry)));
+
+        QuickSwitchText().Text(Tr(S::QuickSwitch));
+        FriendsNavText().Text(Tr(S::Friends));
+        DmHeaderText().Text(Tr(S::DirectMessages));
+        FriendsTitleText().Text(Tr(S::Friends));
+        TabOnline().Content(box_value(Tr(S::StatusOnline)));
+        TabAll().Content(box_value(Tr(S::TabAll)));
+        TabPending().Content(box_value(Tr(S::TabPending)));
+        TabAdd().Content(box_value(Tr(S::TabAdd)));
+        FriendsSearch().PlaceholderText(Tr(S::Search));
+        AddFriendTitle().Text(Tr(S::TabAdd));
+        AddFriendHintText().Text(Tr(S::AddFriendHint));
+        AddFriendBox().PlaceholderText(Tr(S::AddFriendHint));
+        SendFriendRequestButton().Content(box_value(Tr(S::SendFriendRequest)));
+
+        tip(BackButton(), S::Back);
+        tip(ForwardButton(), S::Forward);
+        tip(MembersToggle(), S::ShowMembers);
+        tip(AttachButton(), S::AttachFile);
+        tip(ComposerEmojiButton(), S::PickEmoji);
+        tip(CancelReplyButton(), S::CancelEsc);
+        tip(SettingsButton(), S::Settings);
+        tip(QuickSwitchButton(), S::QuickSwitch);
+    }
+
+    void MainWindow::OnSettings(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        MenuFlyout menu;
+        MenuFlyoutSubItem language;
+        language.Text(I18n::Tr(I18n::S::Language));
+        FontIcon globe;
+        globe.Glyph(L"");
+        language.Icon(globe);
+        for (int i = 0; i < static_cast<int>(I18n::Lang::Count); ++i)
+        {
+            auto lang = static_cast<I18n::Lang>(i);
+            RadioMenuFlyoutItem item;
+            item.Text(I18n::NativeName(lang));
+            item.GroupName(L"lang");
+            item.IsChecked(lang == I18n::Current());
+            item.Click([weak = get_weak(), lang](auto&&, auto&&)
+            {
+                auto self = weak.get();
+                if (!self) return;
+                I18n::SetLanguage(lang);
+                self->ApplyTexts();
+                // Rebuild what carries translated text.
+                self->RefreshGuildRail();
+                self->RefreshChannelList();
+                if (self->m_showingFriends) { self->RefreshFriends(); self->RefreshActiveNow(); }
+                else if (!self->m_currentChannelId.empty())
+                {
+                    auto item = self->ChannelList().SelectedItem().try_as<DiscordWin3::ChannelItem>();
+                    std::wstring channel = self->m_currentChannelId;
+                    self->m_currentChannelId.clear();
+                    self->LoadChannel(channel, item ? std::wstring{ item.Name() } : std::wstring{});
+                }
+                self->UpdateTitle();
+            });
+            language.Items().Append(item);
+        }
+        menu.Items().Append(language);
+        menu.Items().Append(MenuFlyoutSeparator{});
+
+        MenuFlyoutItem logout;
+        logout.Text(I18n::Tr(I18n::S::Logout));
+        FontIcon door;
+        door.Glyph(L"");
+        logout.Icon(door);
+        logout.Foreground(SolidBrush(0xF23F43));
+        logout.Click([weak = get_weak()](auto&&, auto&&)
+        {
+            if (auto self = weak.get()) self->OnLogout(nullptr, nullptr);
+        });
+        menu.Items().Append(logout);
+        menu.ShowAt(sender.as<FrameworkElement>());
+    }
+
+    // ------------------------------------------------------------------ hover bar
+
+    ::DiscordWin3::MessageData const* MainWindow::MessageFromSender(IInspectable const& sender)
+    {
+        auto element = sender.try_as<FrameworkElement>();
+        auto item = element ? element.DataContext().try_as<DiscordWin3::MessageItem>() : nullptr;
+        return item ? &Impl(item)->Data() : nullptr;
+    }
+
+    void MainWindow::OnHoverReaction(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto data = MessageFromSender(sender);
+        auto emoji = unbox_value_or<hstring>(sender.as<Button>().Content(), L"");
+        if (!data || emoji.empty()) return;
+        ::DiscordWin3::Reaction reaction{ std::wstring{ emoji }, L"", 0, false };
+        for (auto const& r : data->reactions)
+        {
+            if (r.id.empty() && r.name == reaction.name) reaction.me = r.me;
+        }
+        ToggleReaction(data->id, reaction);
+    }
+
+    void MainWindow::OnHoverPicker(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto data = MessageFromSender(sender);
+        if (!data) return;
+        auto messageId = data->id;
+        auto existing = data->reactions;
+        ShowEmojiPicker(sender.as<FrameworkElement>(), [weak = get_weak(), messageId, existing](::DiscordWin3::Reaction reaction)
+        {
+            auto self = weak.get();
+            if (!self) return;
+            for (auto const& r : existing)
+            {
+                if (r.name == reaction.name && r.id == reaction.id) reaction.me = r.me;
+            }
+            self->ToggleReaction(messageId, reaction);
+        });
+    }
+
+    void MainWindow::OnHoverEdit(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        if (auto data = MessageFromSender(sender)) StartEdit(*data);
+    }
+
+    void MainWindow::OnHoverReply(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        if (auto data = MessageFromSender(sender)) StartReply(*data);
+    }
+
+    void MainWindow::OnHoverForward(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        if (auto data = MessageFromSender(sender)) ForwardMessage(*data);
+    }
+
+    void MainWindow::OnHoverMore(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        // Same menu as right-click, anchored on the "..." button.
+        auto element = sender.as<FrameworkElement>();
+        Primitives::FlyoutShowOptions options;
+        options.Placement(Primitives::FlyoutPlacementMode::BottomEdgeAlignedRight);
+        m_messageMenu.ShowAt(element, options);
+    }
+
+    void MainWindow::RememberEmoji(std::wstring const& emoji)
+    {
+        std::erase(m_recentEmojis, emoji);
+        m_recentEmojis.insert(m_recentEmojis.begin(), emoji);
+        if (m_recentEmojis.size() > 3) m_recentEmojis.resize(3);
+    }
+
+    // ------------------------------------------------------------------ emoji picker
+
+    void MainWindow::ShowEmojiPicker(FrameworkElement const& anchor, std::function<void(::DiscordWin3::Reaction const&)> onPick)
+    {
+        static constexpr wchar_t const* Common[] = {
+            L"😀", L"😂", L"🤣", L"😊", L"😍", L"🥰", L"😘", L"😎", L"🤔", L"😐", L"🙄", L"😏", L"😮", L"😢", L"😭", L"😡",
+            L"🥺", L"😴", L"🤯", L"🥳", L"😇", L"🤡", L"💀", L"👻", L"👍", L"👎", L"👏", L"🙏", L"💪", L"👀", L"🤝", L"👋",
+            L"✌️", L"🤞", L"👌", L"🫡", L"❤️", L"🧡", L"💛", L"💚", L"💙", L"💜", L"🖤", L"💔", L"🔥", L"✨", L"⭐", L"🎉",
+            L"💯", L"✅", L"❌", L"⚠️", L"❓", L"💤", L"🎮", L"🏆", L"⚽", L"🍕", L"🍔", L"☕", L"🍺", L"🐱", L"🐶", L"🦆",
+        };
+
+        Flyout flyout;
+        StackPanel root;
+        root.Width(9 * 40 + 16);
+        root.Spacing(6);
+
+        auto section = [&](std::wstring const& title)
+        {
+            TextBlock header;
+            header.Text(title);
+            header.FontSize(12);
+            header.FontWeight(Windows::UI::Text::FontWeight{ 600 });
+            header.Foreground(SolidBrush(0x949BA4));
+            root.Children().Append(header);
+            VariableSizedWrapGrid grid;
+            grid.Orientation(Orientation::Horizontal);
+            grid.MaximumRowsOrColumns(9);
+            grid.ItemWidth(40);
+            grid.ItemHeight(40);
+            root.Children().Append(grid);
+            return grid;
+        };
+        auto addButton = [&](VariableSizedWrapGrid const& grid, UIElement const& content, ::DiscordWin3::Reaction reaction, std::wstring const& tooltip)
+        {
+            Button b;
+            b.Content(content);
+            b.Width(38);
+            b.Height(38);
+            b.Padding({ 0, 0, 0, 0 });
+            b.Background(SolidBrush(0, 0));
+            b.BorderThickness({ 0, 0, 0, 0 });
+            ToolTipService::SetToolTip(b, box_value(tooltip));
+            b.Click([flyout, onPick, reaction](auto&&, auto&&)
+            {
+                flyout.Hide();
+                onPick(reaction);
+            });
+            grid.Children().Append(b);
+        };
+        auto textEmoji = [](std::wstring const& e)
+        {
+            TextBlock t;
+            t.Text(e);
+            t.FontSize(22);
+            t.HorizontalAlignment(HorizontalAlignment::Center);
+            return t;
+        };
+
+        auto recent = section(I18n::Tr(I18n::S::FrequentEmojis));
+        for (auto const& e : m_recentEmojis) addButton(recent, textEmoji(e), { e, L"", 0, false }, e);
+        for (auto e : Common)
+        {
+            if (std::find(m_recentEmojis.begin(), m_recentEmojis.end(), e) == m_recentEmojis.end())
+                addButton(recent, textEmoji(e), { e, L"", 0, false }, e);
+        }
+
+        if (auto guild = FindGuild(m_currentGuildId); guild && !guild->emojis.empty())
+        {
+            auto custom = section(I18n::Tr(I18n::S::ServerEmojis));
+            size_t shown = 0;
+            for (auto const& emoji : guild->emojis)
+            {
+                Image image;
+                image.Width(28);
+                image.Height(28);
+                image.Source(::DiscordWin3::ImageCache::Get(std::wstring{ Discord::CdnBase } + L"/emojis/" + emoji.id + L".png?size=48", 28));
+                addButton(custom, image, { emoji.name, emoji.id, 0, false }, L":" + emoji.name + L":");
+                if (++shown >= 150) break;   // keep the flyout light
+            }
+        }
+
+        ScrollViewer scroller;
+        scroller.MaxHeight(420);
+        scroller.Content(root);
+        flyout.Content(scroller);
+        flyout.ShowAt(anchor);
+    }
+
+    void MainWindow::OnComposerEmoji(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        ShowEmojiPicker(sender.as<FrameworkElement>(), [weak = get_weak()](::DiscordWin3::Reaction const& r)
+        {
+            auto self = weak.get();
+            if (!self) return;
+            std::wstring insert = r.id.empty() ? r.name : L"<:" + r.name + L":" + r.id + L">";
+            auto box = self->Composer();
+            std::wstring text{ box.Text() };
+            auto pos = std::min<size_t>(static_cast<size_t>(box.SelectionStart()), text.size());
+            text.insert(pos, insert);
+            box.Text(text);
+            box.SelectionStart(static_cast<int32_t>(pos + insert.size()));
+            box.Focus(FocusState::Programmatic);
+            if (r.id.empty()) self->RememberEmoji(r.name);
+        });
+    }
+
+    // ------------------------------------------------------------------ forwarding
+
+    fire_and_forget MainWindow::ForwardMessage(MessageData data)
+    {
+        auto strong = get_strong();
+        auto sourceChannel = m_currentChannelId;
+        auto sourceGuild = m_currentGuildId;
+
+        struct Target { std::wstring label, lower, channel; };
+        auto targets = std::make_shared<std::vector<Target>>();
+        auto lower = [](std::wstring s)
+        {
+            if (!s.empty()) CharLowerBuffW(s.data(), static_cast<DWORD>(s.size()));
+            return s;
+        };
+        for (auto const& dm : m_dms) targets->push_back({ L"@ " + dm.name, lower(dm.name), dm.id });
+        for (auto const& g : m_guilds)
+        {
+            for (auto const& c : g.channels)
+            {
+                if (IsTextLike(c.type) && g.perms.CanView(c.overwrites))
+                    targets->push_back({ L"# " + c.name + L"   —   " + g.name, lower(c.name + L" " + g.name), c.id });
+            }
+        }
+
+        AutoSuggestBox box;
+        box.PlaceholderText(I18n::Tr(I18n::S::QuickSwitchPlaceholder));
+        box.Width(460);
+        auto matches = std::make_shared<std::vector<Target const*>>();
+        auto chosen = std::make_shared<std::wstring>();
+
+        ContentDialog dialog;
+        dialog.XamlRoot(Content().XamlRoot());
+        dialog.Title(box_value(I18n::Tr(I18n::S::ForwardTitle)));
+        dialog.Content(box);
+        dialog.CloseButtonText(I18n::Tr(I18n::S::Cancel));
+
+        box.TextChanged([targets, matches, lower](AutoSuggestBox const& sender, AutoSuggestBoxTextChangedEventArgs const& args)
+        {
+            if (args.Reason() != AutoSuggestionBoxTextChangeReason::UserInput) return;
+            auto query = lower(std::wstring{ sender.Text() });
+            matches->clear();
+            std::vector<IInspectable> labels;
+            for (auto const& t : *targets)
+            {
+                if (query.empty() || t.lower.find(query) == std::wstring::npos) continue;
+                matches->push_back(&t);
+                labels.push_back(box_value(t.label));
+                if (labels.size() >= 12) break;
+            }
+            sender.ItemsSource(single_threaded_vector(std::move(labels)));
+        });
+        auto choose = [matches, chosen, dialog](std::wstring const& label)
+        {
+            for (auto t : *matches)
+            {
+                if (t->label == label || label.empty())
+                {
+                    *chosen = t->channel;
+                    dialog.Hide();
+                    return;
+                }
+            }
+        };
+        box.SuggestionChosen([choose](AutoSuggestBox const&, AutoSuggestBoxSuggestionChosenEventArgs const& args)
+        {
+            choose(std::wstring{ unbox_value<hstring>(args.SelectedItem()) });
+        });
+        box.QuerySubmitted([choose](AutoSuggestBox const&, AutoSuggestBoxQuerySubmittedEventArgs const& args)
+        {
+            choose(args.ChosenSuggestion() ? std::wstring{ unbox_value<hstring>(args.ChosenSuggestion()) } : std::wstring{});
+        });
+        box.Loaded([](IInspectable const& sender, RoutedEventArgs const&)
+        {
+            sender.as<AutoSuggestBox>().Focus(FocusState::Programmatic);
+        });
+
+        co_await dialog.ShowAsync();
+        if (chosen->empty() || !m_rest) co_return;
+
+        // Message forwarding (2024): a reference of type 1 = FORWARD.
+        JsonObject reference;
+        reference.Insert(L"type", JsonValue::CreateNumberValue(1));
+        reference.Insert(L"message_id", JsonValue::CreateStringValue(data.id));
+        reference.Insert(L"channel_id", JsonValue::CreateStringValue(sourceChannel));
+        if (sourceGuild != HomeId) reference.Insert(L"guild_id", JsonValue::CreateStringValue(sourceGuild));
+        JsonObject body;
+        body.Insert(L"message_reference", reference);
+        body.Insert(L"nonce", JsonValue::CreateStringValue(NowNonce()));
+        try
+        {
+            co_await m_rest->PostJson(L"/channels/" + *chosen + L"/messages", body);
+        }
+        catch (hresult_error const& e)
+        {
+            StatusText().Text(I18n::Fmt(I18n::S::SendFailed, std::wstring{ e.message() }.substr(0, 80)));
+        }
+    }
+
+    // ------------------------------------------------------------------ attachments
+
+    fire_and_forget MainWindow::StageFile(std::wstring path, std::wstring displayName)
+    {
+        auto strong = get_strong();
+        PendingAttachment pending;
+        pending.path = path;
+        try
+        {
+            auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(path);
+            auto props = co_await file.GetBasicPropertiesAsync();
+            pending.size = props.Size();
+            pending.filename = displayName.empty() ? std::wstring{ file.Name() } : displayName;
+            std::wstring type{ file.ContentType() };
+            pending.image = type.starts_with(L"image/");
+        }
+        catch (...)
+        {
+            co_return;
+        }
+        co_await wil::resume_foreground(m_dispatcher);
+        if (m_pending.size() >= 10) co_return;   // Discord limit per message
+        m_pending.push_back(std::move(pending));
+        RenderPending();
+    }
+
+    void MainWindow::RenderPending()
+    {
+        PendingPanel().Children().Clear();
+        PendingScroller().Visibility(Show(!m_pending.empty()));
+        for (size_t i = 0; i < m_pending.size(); ++i)
+        {
+            auto const& p = m_pending[i];
+
+            Grid card;
+            card.Width(200);
+            card.Height(200);
+            card.CornerRadius({ 8, 8, 8, 8 });
+            card.Background(SolidBrush(0x1A1A1E));
+            card.Padding({ 8, 8, 8, 8 });
+            RowDefinition r0, r1;
+            r0.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+            r1.Height(GridLengthHelper::Auto());
+            card.RowDefinitions().Append(r0);
+            card.RowDefinitions().Append(r1);
+
+            if (p.image)
+            {
+                Image preview;
+                preview.Stretch(Media::Stretch::Uniform);
+                Media::Imaging::BitmapImage bitmap;
+                bitmap.DecodePixelWidth(184);
+                preview.Source(bitmap);
+                [](Media::Imaging::BitmapImage bitmap, std::wstring path) -> fire_and_forget
+                {
+                    try
+                    {
+                        auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(path);
+                        auto stream = co_await file.OpenReadAsync();
+                        co_await bitmap.SetSourceAsync(stream);
+                    }
+                    catch (...)
+                    {
+                    }
+                }(bitmap, p.path);
+                card.Children().Append(preview);
+            }
+            else
+            {
+                FontIcon icon;
+                icon.Glyph(L"");
+                icon.FontSize(56);
+                card.Children().Append(icon);
+            }
+            if (p.spoiler)
+            {
+                Border veil;
+                veil.Background(SolidBrush(0x111214, 0xE6));
+                veil.CornerRadius({ 6, 6, 6, 6 });
+                TextBlock label;
+                label.Text(L"SPOILER");
+                label.FontWeight(Windows::UI::Text::FontWeight{ 700 });
+                label.HorizontalAlignment(HorizontalAlignment::Center);
+                label.VerticalAlignment(VerticalAlignment::Center);
+                veil.Child(label);
+                card.Children().Append(veil);
+            }
+
+            TextBlock name;
+            name.Text(p.filename);
+            name.FontSize(13);
+            name.Margin({ 0, 6, 0, 0 });
+            name.TextTrimming(TextTrimming::CharacterEllipsis);
+            Grid::SetRow(name, 1);
+            card.Children().Append(name);
+
+            // Edit / remove buttons on the top-right corner, like the official client.
+            StackPanel actions;
+            actions.Orientation(Orientation::Horizontal);
+            actions.HorizontalAlignment(HorizontalAlignment::Right);
+            actions.VerticalAlignment(VerticalAlignment::Top);
+            actions.Margin({ 0, -20, -16, 0 });
+            actions.CornerRadius({ 6, 6, 6, 6 });
+            actions.Background(SolidBrush(0x1E1F22));
+            auto action = [&](wchar_t const* glyph, I18n::S tip, uint32_t color, std::function<void(MainWindow*)> run)
+            {
+                Button b;
+                FontIcon icon;
+                icon.Glyph(glyph);
+                icon.FontSize(15);
+                if (color) icon.Foreground(SolidBrush(color));
+                b.Content(icon);
+                b.Width(34);
+                b.Height(32);
+                b.Padding({ 0, 0, 0, 0 });
+                b.Background(SolidBrush(0, 0));
+                b.BorderThickness({ 0, 0, 0, 0 });
+                ToolTipService::SetToolTip(b, box_value(I18n::Tr(tip)));
+                b.Click([weak = get_weak(), run](auto&&, auto&&) { if (auto self = weak.get()) run(self.get()); });
+                actions.Children().Append(b);
+            };
+            action(L"", I18n::S::EditAttachment, 0, [i](MainWindow* w) { w->EditPending(i); });
+            action(L"", I18n::S::RemoveAttachment, 0xF23F43, [i](MainWindow* w)
+            {
+                if (i < w->m_pending.size()) w->m_pending.erase(w->m_pending.begin() + i);
+                w->RenderPending();
+            });
+            card.Children().Append(actions);
+
+            PendingPanel().Children().Append(card);
+        }
+    }
+
+    fire_and_forget MainWindow::EditPending(size_t index)
+    {
+        auto strong = get_strong();
+        if (index >= m_pending.size()) co_return;
+        auto current = m_pending[index];
+
+        StackPanel form;
+        form.Spacing(8);
+        form.Width(400);
+        if (current.image)
+        {
+            Image preview;
+            preview.MaxHeight(160);
+            preview.Stretch(Media::Stretch::Uniform);
+            Media::Imaging::BitmapImage bitmap;
+            bitmap.DecodePixelWidth(400);
+            preview.Source(bitmap);
+            try
+            {
+                auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(current.path);
+                co_await bitmap.SetSourceAsync(co_await file.OpenReadAsync());
+            }
+            catch (...)
+            {
+            }
+            form.Children().Append(preview);
+        }
+        auto label = [&](I18n::S key)
+        {
+            TextBlock t;
+            t.Text(I18n::Tr(key));
+            t.FontWeight(Windows::UI::Text::FontWeight{ 600 });
+            t.Margin({ 0, 8, 0, 0 });
+            form.Children().Append(t);
+        };
+        label(I18n::S::FileName);
+        TextBox name;
+        name.Text(current.filename);
+        form.Children().Append(name);
+        label(I18n::S::AltText);
+        TextBox description;
+        description.PlaceholderText(I18n::Tr(I18n::S::AddDescription));
+        description.Text(current.description);
+        description.AcceptsReturn(true);
+        description.TextWrapping(TextWrapping::Wrap);
+        description.Height(80);
+        form.Children().Append(description);
+        CheckBox spoiler;
+        spoiler.Content(box_value(I18n::Tr(I18n::S::MarkSpoiler)));
+        spoiler.IsChecked(current.spoiler);
+        spoiler.Margin({ 0, 8, 0, 0 });
+        form.Children().Append(spoiler);
+
+        ContentDialog dialog;
+        dialog.XamlRoot(Content().XamlRoot());
+        dialog.Title(box_value(I18n::Tr(I18n::S::EditAttachment)));
+        dialog.Content(form);
+        dialog.PrimaryButtonText(I18n::Tr(I18n::S::Save));
+        dialog.CloseButtonText(I18n::Tr(I18n::S::Cancel));
+        dialog.DefaultButton(ContentDialogButton::Primary);
+        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || index >= m_pending.size()) co_return;
+
+        auto& p = m_pending[index];
+        std::wstring newName{ name.Text() };
+        if (!newName.empty()) p.filename = newName;
+        p.description = description.Text();
+        p.spoiler = spoiler.IsChecked() && spoiler.IsChecked().Value();
+        RenderPending();
+    }
+
+    fire_and_forget MainWindow::SendWithAttachments(std::wstring text, std::wstring replyToId)
+    {
+        using namespace Windows::Web::Http;
+        auto strong = get_strong();
+        auto rest = m_rest;
+        auto channelId = m_currentChannelId;
+        auto files = std::move(m_pending);
+        m_pending.clear();
+        RenderPending();
+        if (!rest || channelId.empty() || files.empty()) co_return;
+
+        uint64_t total = 0;
+        for (auto const& f : files) total += f.size;
+        if (total > 20ull * 1024 * 1024)
+        {
+            StatusText().Text(I18n::Tr(I18n::S::FileTooBig));
+            m_pending = std::move(files);
+            RenderPending();
+            co_return;
+        }
+        StatusText().Text(I18n::Fmt(I18n::S::Uploading, files.size() == 1 ? files[0].filename : std::to_wstring(files.size())));
+
+        hstring error;
+        try
+        {
+            JsonArray attachments;
+            HttpMultipartFormDataContent form;
+            for (size_t i = 0; i < files.size(); ++i)
+            {
+                auto const& f = files[i];
+                std::wstring name = (f.spoiler && !f.filename.starts_with(L"SPOILER_") ? L"SPOILER_" : L"") + f.filename;
+                JsonObject a;
+                a.Insert(L"id", JsonValue::CreateStringValue(std::to_wstring(i)));
+                a.Insert(L"filename", JsonValue::CreateStringValue(name));
+                if (!f.description.empty()) a.Insert(L"description", JsonValue::CreateStringValue(f.description));
+                attachments.Append(a);
+
+                auto file = co_await Windows::Storage::StorageFile::GetFileFromPathAsync(f.path);
+                HttpStreamContent content{ co_await file.OpenReadAsync() };
+                auto type = file.ContentType().empty() ? hstring{ L"application/octet-stream" } : file.ContentType();
+                content.Headers().ContentType(Headers::HttpMediaTypeHeaderValue{ type });
+                form.Add(content, L"files[" + std::to_wstring(i) + L"]", name);
+            }
+
+            JsonObject payload;
+            payload.Insert(L"content", JsonValue::CreateStringValue(text));
+            payload.Insert(L"nonce", JsonValue::CreateStringValue(NowNonce()));
+            payload.Insert(L"attachments", attachments);
+            if (!replyToId.empty())
+            {
+                JsonObject reference;
+                reference.Insert(L"message_id", JsonValue::CreateStringValue(replyToId));
+                reference.Insert(L"channel_id", JsonValue::CreateStringValue(channelId));
+                payload.Insert(L"message_reference", reference);
+            }
+            form.Add(HttpStringContent{ payload.Stringify(), Windows::Storage::Streams::UnicodeEncoding::Utf8, L"application/json" },
+                     L"payload_json");
+            co_await rest->PostContent(L"/channels/" + channelId + L"/messages", form);
+        }
+        catch (hresult_error const& e)
+        {
+            error = e.message();
+        }
+        co_await wil::resume_foreground(m_dispatcher);
+        StatusText().Text(error.empty() ? std::wstring{} : I18n::Fmt(I18n::S::SendFailed, std::wstring{ error }.substr(0, 80)));
+    }
+
+    fire_and_forget MainWindow::OnComposerPaste(IInspectable const&, TextControlPasteEventArgs const& e)
+    {
+        using namespace Windows::ApplicationModel::DataTransfer;
+        auto strong = get_strong();
+        auto content = Clipboard::GetContent();
+        if (content.Contains(StandardDataFormats::StorageItems()))
+        {
+            e.Handled(true);
+            for (auto const& item : co_await content.GetStorageItemsAsync())
+            {
+                if (auto file = item.try_as<Windows::Storage::StorageFile>()) StageFile(std::wstring{ file.Path() });
+            }
+            co_return;
+        }
+        if (!content.Contains(StandardDataFormats::Bitmap())) co_return;
+
+        // Screenshot in the clipboard -> image.png, like the official client.
+        e.Handled(true);
+        try
+        {
+            using namespace Windows::Graphics::Imaging;
+            auto reference = co_await content.GetBitmapAsync();
+            auto stream = co_await reference.OpenReadAsync();
+            auto decoder = co_await BitmapDecoder::CreateAsync(stream);
+            auto bitmap = co_await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat::Bgra8, BitmapAlphaMode::Premultiplied);
+
+            wchar_t temp[MAX_PATH]{};
+            GetTempPathW(MAX_PATH, temp);
+            auto folder = co_await Windows::Storage::StorageFolder::GetFolderFromPathAsync(temp);
+            auto file = co_await folder.CreateFileAsync(L"discordwin3-paste.png", Windows::Storage::CreationCollisionOption::GenerateUniqueName);
+            {
+                auto output = co_await file.OpenAsync(Windows::Storage::FileAccessMode::ReadWrite);
+                auto encoder = co_await BitmapEncoder::CreateAsync(BitmapEncoder::PngEncoderId(), output);
+                encoder.SetSoftwareBitmap(bitmap);
+                co_await encoder.FlushAsync();
+            }
+            StageFile(std::wstring{ file.Path() }, L"image.png");
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void MainWindow::OnChatDragOver(IInspectable const&, DragEventArgs const& e)
+    {
+        using namespace Windows::ApplicationModel::DataTransfer;
+        if (!m_currentChannelId.empty() && e.DataView().Contains(StandardDataFormats::StorageItems()))
+        {
+            e.AcceptedOperation(DataPackageOperation::Copy);
+        }
+    }
+
+    fire_and_forget MainWindow::OnChatDrop(IInspectable const&, DragEventArgs const& e)
+    {
+        using namespace Windows::ApplicationModel::DataTransfer;
+        auto strong = get_strong();
+        if (m_currentChannelId.empty() || !e.DataView().Contains(StandardDataFormats::StorageItems())) co_return;
+        auto deferral = e.GetDeferral();
+        auto items = co_await e.DataView().GetStorageItemsAsync();
+        deferral.Complete();
+        for (auto const& item : items)
+        {
+            if (auto file = item.try_as<Windows::Storage::StorageFile>()) StageFile(std::wstring{ file.Path() });
+        }
+    }
+}
+
+namespace winrt::DiscordWin3::implementation
+{
+    // ------------------------------------------------------------------ media (video player, download)
+
+    void MainWindow::OnPlayVideo(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto button = sender.as<Button>();
+        auto data = MessageFromSender(sender);
+        auto host = Media::VisualTreeHelper::GetParent(button).try_as<Grid>();
+        if (!data || !host || data->mediaUrl.empty()) return;
+
+        MediaPlayerElement player;
+        player.Source(Windows::Media::Core::MediaSource::CreateFromUri(Uri{ data->mediaUrl }));
+        player.AreTransportControlsEnabled(true);
+        player.AutoPlay(true);
+        player.Stretch(Media::Stretch::Uniform);
+        host.Children().Append(player);
+        button.Visibility(Visibility::Collapsed);
+    }
+
+    fire_and_forget MainWindow::OnDownloadMedia(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto strong = get_strong();
+        auto data = MessageFromSender(sender);
+        if (!data) co_return;
+        std::wstring url = data->mediaUrl.empty() ? data->imageUrl : data->mediaUrl;
+        if (url.empty()) co_return;
+
+        // File name = last path segment, without the signed query string.
+        std::wstring name = url.substr(0, url.find(L'?'));
+        name = name.substr(name.find_last_of(L'/') + 1);
+        auto dot = name.find_last_of(L'.');
+        std::wstring extension = dot == std::wstring::npos ? L".bin" : name.substr(dot);
+
+        Microsoft::Windows::Storage::Pickers::FileSavePicker picker{ AppWindow().Id() };
+        picker.SuggestedFileName(dot == std::wstring::npos ? name : name.substr(0, dot));
+        picker.FileTypeChoices().Insert(extension, single_threaded_vector<hstring>({ hstring{ extension } }));
+        auto result = co_await picker.PickSaveFileAsync();
+        if (!result) co_return;
+        std::wstring path{ result.Path() };
+
+        try
+        {
+            // Streamed to disk in 64 KB chunks: a 20 MB video never sits in RAM.
+            Windows::Web::Http::HttpClient client;
+            auto input = co_await client.GetInputStreamAsync(Uri{ url });
+            std::ofstream out{ std::filesystem::path{ path }, std::ios::binary | std::ios::trunc };
+            Windows::Storage::Streams::Buffer buffer{ 64 * 1024 };
+            for (;;)
+            {
+                auto chunk = co_await input.ReadAsync(buffer, buffer.Capacity(), Windows::Storage::Streams::InputStreamOptions::Partial);
+                if (chunk.Length() == 0) break;
+                out.write(reinterpret_cast<char const*>(chunk.data()), chunk.Length());
+            }
+        }
+        catch (...)
+        {
+        }
     }
 }

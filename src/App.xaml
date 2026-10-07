@@ -30,6 +30,16 @@
             <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#2C2C31" />
             <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#26262B" />
             <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#2C2C31" />
+
+            <!-- Small square icon buttons of the message hover bar -->
+            <Style x:Key="HoverButton" TargetType="Button">
+                <Setter Property="Width" Value="34" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

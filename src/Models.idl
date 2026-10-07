@@ -56,6 +56,8 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Media.Brush RowBackground { get; };
         Microsoft.UI.Xaml.Visibility ContentVisibility { get; };
         Microsoft.UI.Xaml.Visibility ReactionsVisibility { get; };
+        Microsoft.UI.Xaml.Visibility OwnVisibility { get; };
+        Microsoft.UI.Xaml.Visibility OthersVisibility { get; };
         Microsoft.UI.Xaml.Visibility DayVisibility { get; };
         String DayText { get; };
         String TagText { get; };
@@ -64,6 +66,7 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Visibility ReplyVisibility { get; };
         Microsoft.UI.Xaml.Media.ImageSource Image { get; };
         Microsoft.UI.Xaml.Visibility ImageVisibility { get; };
+        Microsoft.UI.Xaml.Visibility VideoVisibility { get; };
         Double ImageWidth { get; };
         Double ImageHeight { get; };
         String Files { get; };
