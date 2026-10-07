@@ -40,6 +40,9 @@ Langues : Français, English, Português (Portugal), Português (Brasil), Españ
 - Rejoindre un salon vocal (clic), appeler en MP (bouton téléphone + sonnerie)
 - Audio Opus 48 kHz, chiffrement de transport AES-256-GCM et **DAVE** (chiffrement de bout en bout obligatoire depuis mars 2026, via `libdave` officiel)
 - Muet / sourdine, panneau « Connecté au vocal », anneau vert sur les personnes qui parlent
+- Écran d'appel (grille des participants) et **statistiques pour les geeks** (ping, paquets, pertes, état DAVE)
+- Sons d'appel : rejoindre / quitter, quelqu'un arrive / part, muet, sourdine, début / fin de stream
+- **Partage d'écran (Go Live)** : écran ou fenêtre via Windows.Graphics.Capture, mise à l'échelle + NV12 sur le GPU, encodage H.264 Media Foundation, flux RTP chiffré DAVE (720p30)
 
 ## Optimisations mémoire & énergie
 
@@ -57,7 +60,8 @@ Langues : Français, English, Português (Portugal), Português (Brasil), Españ
 | Fonction | Année officielle | Statut |
 |---|---|---|
 | Appels vocaux (salons + MP, DAVE) | — / 2024 | 🟡 implémenté, à tester |
-| Partage d'écran / Go Live, caméra | 2017 / 2024 | à faire (prochaine étape) |
+| Partage d'écran / Go Live (envoi) | 2017 | 🟡 fait, à tester |
+| Regarder le stream des autres, caméra | 2017 / 2024 | à faire (prochaine étape) |
 | Boutons Précédent / Suivant | 2026 | ✅ |
 | Liste d'amis | — | ✅ (note de demande : à faire) |
 | Transfert de messages | 2024 | ✅ |
