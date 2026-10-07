@@ -90,7 +90,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <AdditionalLibraryDirectories>$(VoiceDeps)installed\x64-windows-static-md\lib;$(VoiceDeps)libdave\cpp\build;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libdave.lib;mlspp.lib;mls_ds.lib;hpke.lib;bytes.lib;tls_syntax.lib;opus.lib;libssl.lib;libcrypto.lib;ws2_32.lib;avrt.lib;crypt32.lib;bcrypt.lib;shell32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libdave.lib;mlspp.lib;mls_ds.lib;hpke.lib;bytes.lib;tls_syntax.lib;opus.lib;libssl.lib;libcrypto.lib;ws2_32.lib;avrt.lib;winmm.lib;d3d11.lib;dxgi.lib;mfplat.lib;mfuuid.lib;strmiids.lib;wmcodecdspuuid.lib;crypt32.lib;bcrypt.lib;shell32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -152,6 +152,8 @@
     <ClInclude Include="Voice\AesGcm.h" />
     <ClInclude Include="Voice\AudioEngine.h" />
     <ClInclude Include="Voice\VoiceConnection.h" />
+    <ClInclude Include="Voice\ScreenShare.h" />
+    <ClInclude Include="Voice\Sounds.h" />
     <ClInclude Include="MemLog.h" />
     <ClInclude Include="ImageCache.h" />
     <ClInclude Include="third_party\qrcodegen.hpp" />
@@ -178,6 +180,8 @@
     <ClCompile Include="Voice\AesGcm.cpp" />
     <ClCompile Include="Voice\AudioEngine.cpp" />
     <ClCompile Include="Voice\VoiceConnection.cpp" />
+    <ClCompile Include="Voice\ScreenShare.cpp" />
+    <ClCompile Include="Voice\Sounds.cpp" />
     <ClCompile Include="ImageCache.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="third_party\qrcodegen.cpp">

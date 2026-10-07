@@ -23,6 +23,8 @@ namespace DiscordWin3::Voice
         std::wstring sessionId;   // from our VOICE_STATE_UPDATE
         std::wstring token;       // from VOICE_SERVER_UPDATE
         std::wstring endpoint;    // from VOICE_SERVER_UPDATE ("host:port")
+        bool stream = false;      // Go Live sender connection (video, no microphone)
+        std::wstring daveGroupId; // MLS group id when it differs from channelId (streams: rtc_server_id - 1)
     };
 
     // One voice call: voice gateway (v8) + UDP/RTP (aead_aes256_gcm_rtpsize) + Opus + DAVE (E2EE, mandatory
@@ -66,6 +68,10 @@ namespace DiscordWin3::Voice
         void SetMuted(bool muted);
         void SetDeafened(bool deafened);
 
+        // Go Live: one encoded H.264 access unit (Annex B), 90 kHz timestamp. Any thread.
+        void SendVideoFrame(uint8_t const* frame, size_t length, uint32_t timestamp90k);
+        bool VideoReady() const { return m_videoReady; }
+
     private:
         // Voice gateway
         winrt::fire_and_forget Connect();
@@ -104,6 +110,12 @@ namespace DiscordWin3::Voice
         SOCKET m_udp = INVALID_SOCKET;
         std::thread m_receiver;
         uint32_t m_ssrc = 0;
+        uint32_t m_videoSsrc = 0;
+        uint32_t m_rtxSsrc = 0;
+        uint16_t m_videoSeq = 0;
+        std::atomic<bool> m_videoReady{ false };
+        std::mutex m_videoLock;
+        void SendRtp(uint8_t const* header, size_t headerLength, uint8_t const* payload, size_t payloadLength);
         uint16_t m_rtpSeq = 0;
         uint32_t m_rtpTimestamp = 0;
         uint32_t m_nonce = 0;

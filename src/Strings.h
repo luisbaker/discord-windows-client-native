@@ -132,6 +132,9 @@
     X(StatsForNerds, L"Stats pour les nerds", L"Stats for Nerds", L"Estatísticas para nerds", L"Estatísticas para nerds", L"Estadísticas para nerds", L"Statistiken für Nerds", L"Statistiche per nerd") \
     X(ShareScreen, L"Partager ton écran", L"Share Your Screen", L"Partilhar o ecrã", L"Compartilhar sua tela", L"Compartir pantalla", L"Bildschirm teilen", L"Condividi lo schermo") \
     X(ScreenShareSoon, L"Le partage d'écran (Go Live) arrive dans la prochaine version.", L"Screen sharing (Go Live) is coming in the next version.", L"A partilha de ecrã (Go Live) chega na próxima versão.", L"O compartilhamento de tela (Go Live) chega na próxima versão.", L"Compartir pantalla (Go Live) llegará en la próxima versión.", L"Bildschirmübertragung (Go Live) kommt in der nächsten Version.", L"La condivisione dello schermo (Go Live) arriverà nella prossima versione.") \
+    X(StopSharing, L"Arrêter le partage", L"Stop Streaming", L"Parar a partilha", L"Parar transmissão", L"Dejar de compartir", L"Übertragung beenden", L"Interrompi la condivisione") \
+    X(ShareNeedsVoice, L"Rejoins d'abord un salon vocal pour partager ton écran.", L"Join a voice channel first to share your screen.", L"Entra primeiro num canal de voz para partilhar o ecrã.", L"Entre primeiro em um canal de voz para compartilhar sua tela.", L"Únete primero a un canal de voz para compartir tu pantalla.", L"Tritt zuerst einem Sprachkanal bei, um deinen Bildschirm zu teilen.", L"Entra prima in un canale vocale per condividere lo schermo.") \
+    X(Live, L"EN DIRECT", L"LIVE", L"EM DIRETO", L"AO VIVO", L"EN DIRECTO", L"LIVE", L"IN DIRETTA") \
     X(StartCall, L"Démarrer un appel vocal", L"Start Voice Call", L"Iniciar chamada de voz", L"Iniciar chamada de voz", L"Iniciar llamada de voz", L"Sprachanruf starten", L"Avvia chiamata vocale")
 
 namespace DiscordWin3::I18n

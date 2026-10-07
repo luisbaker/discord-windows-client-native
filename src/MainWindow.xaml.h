@@ -7,6 +7,7 @@
 #include "Discord/RemoteAuth.h"
 #include "Discord/Rest.h"
 #include "Voice/VoiceConnection.h"
+#include "Voice/ScreenShare.h"
 
 namespace winrt::DiscordWin3::implementation
 {
@@ -232,6 +233,12 @@ namespace winrt::DiscordWin3::implementation
         void RefreshCallParticipants();
         void UpdateStatsText();
 
+        // Go Live (gateway op 18 -> STREAM_CREATE + STREAM_SERVER_UPDATE -> stream VoiceConnection + ScreenShare)
+        fire_and_forget StartScreenShare();
+        void StopScreenShare(bool notifyServer);
+        void TryStartStream();
+        void OnStreamEvent(std::wstring const& type, ::DiscordWin3::Slim::Value const& d);
+
         // Translations
         void ApplyTexts();
 
@@ -302,6 +309,11 @@ namespace winrt::DiscordWin3::implementation
         bool m_selfMute = false;
         bool m_selfDeaf = false;
         std::unordered_set<std::wstring> m_speakingUsers;
+        std::shared_ptr<::DiscordWin3::Voice::VoiceConnection> m_stream;
+        std::unique_ptr<::DiscordWin3::Voice::ScreenShare> m_screen;
+        winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_captureItem{ nullptr };
+        std::wstring m_streamKey, m_streamServerId, m_streamToken, m_streamEndpoint;
+        bool m_voiceConnected = false;
         std::unordered_set<std::wstring> m_dmCallUsers;                              // DM call participants
         std::unordered_map<std::wstring, std::pair<bool, bool>> m_voiceFlags;         // userId -> (muted, deafened)
         bool m_showingCall = false;

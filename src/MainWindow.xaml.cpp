@@ -9,6 +9,7 @@
 #include "TokenStore.h"
 #include "Strings.h"
 #include "MemLog.h"
+#include "Voice/Sounds.h"
 #include "third_party/qrcodegen.hpp"
 
 #include <algorithm>
@@ -381,6 +382,7 @@ namespace winrt::DiscordWin3::implementation
                 if (self->m_gateway) self->m_gateway->Stop();
                 if (self->m_remoteAuth) self->m_remoteAuth->Stop();
                 if (self->m_voice) self->m_voice->Stop();
+                self->StopScreenShare(true);
             }
         });
 
@@ -957,17 +959,32 @@ namespace winrt::DiscordWin3::implementation
                 // DM / group call: track participants of our call only.
                 auto userId = Json::Str(d, L"user_id");
                 m_voiceFlags[userId] = { Json::Bool(d, L"self_mute") || Json::Bool(d, L"mute"), Json::Bool(d, L"self_deaf") || Json::Bool(d, L"deaf") };
+                bool wasInCall = m_dmCallUsers.contains(userId);
                 if (!m_voiceChannel.empty() && Json::Str(d, L"channel_id") == m_voiceChannel) m_dmCallUsers.insert(userId);
                 else m_dmCallUsers.erase(userId);
+                if (userId != m_selfId && wasInCall != m_dmCallUsers.contains(userId) && m_voiceConnected && !m_selfDeaf)
+                    Voice::Play(wasInCall ? Voice::Sound::UserLeave : Voice::Sound::UserJoin);
                 RefreshCallParticipants();
                 return;
             }
+            // Someone entering / leaving our channel: chime, like the official client.
+            auto voiceUser = Json::Str(d, L"user_id");
+            auto before = guild->voice.find(voiceUser);
+            bool wasHere = before != guild->voice.end() && before->second == m_voiceChannel;
             ParseVoiceState(*guild, d);
+            auto after = guild->voice.find(voiceUser);
+            bool isHere = after != guild->voice.end() && after->second == m_voiceChannel;
+            if (!m_voiceChannel.empty() && voiceUser != m_selfId && wasHere != isHere && m_voiceConnected && !m_selfDeaf)
+                Voice::Play(isHere ? Voice::Sound::UserJoin : Voice::Sound::UserLeave);
             if (guild->id == m_voiceGuild) RefreshCallParticipants();
             if (guild->id == m_currentGuildId)
             {
                 RefreshChannelList();
             }
+        }
+        else if (type == L"STREAM_CREATE" || type == L"STREAM_SERVER_UPDATE" || type == L"STREAM_DELETE")
+        {
+            OnStreamEvent(type, d);
         }
         else if (type == L"VOICE_SERVER_UPDATE")
         {
@@ -4949,6 +4966,9 @@ namespace winrt::DiscordWin3::implementation
 
     void MainWindow::LeaveVoice()
     {
+        StopScreenShare(true);
+        if (m_voiceConnected && !m_selfDeaf) Voice::Play(Voice::Sound::SelfLeave);
+        m_voiceConnected = false;
         if (m_voice)
         {
             m_voice->Stop();
@@ -4977,6 +4997,9 @@ namespace winrt::DiscordWin3::implementation
         if (channel.empty())
         {
             // Disconnected by a moderator or from another device.
+            StopScreenShare(false);
+            if (m_voiceConnected) Voice::Play(Voice::Sound::SelfLeave);
+            m_voiceConnected = false;
             if (m_voice) { m_voice->Stop(); m_voice.reset(); }
             m_voiceChannel.clear();
             VoicePanel().Visibility(Visibility::Collapsed);
@@ -5025,6 +5048,8 @@ namespace winrt::DiscordWin3::implementation
                 using State = Voice::VoiceConnection::State;
                 if (state == State::Connected)
                 {
+                    if (!self->m_voiceConnected && !self->m_selfDeaf) Voice::Play(Voice::Sound::SelfJoin);
+                    self->m_voiceConnected = true;
                     self->VoiceStatusText().Text(I18n::Tr(I18n::S::VoiceConnected));
                     self->VoiceStatusText().Foreground(SolidBrush(0x23A55A));
                 }
@@ -5099,6 +5124,7 @@ namespace winrt::DiscordWin3::implementation
     {
         if (m_selfDeaf) m_selfDeaf = false;   // like Discord: unmuting also undeafens
         m_selfMute = !m_selfMute;
+        if (!m_voiceChannel.empty()) Voice::Play(m_selfMute ? Voice::Sound::Mute : Voice::Sound::Unmute);
         if (m_voice) { m_voice->SetMuted(m_selfMute || m_selfDeaf); m_voice->SetDeafened(m_selfDeaf); }
         if (!m_voiceChannel.empty()) SendVoiceState();
         UpdateVoiceButtons();
@@ -5107,6 +5133,7 @@ namespace winrt::DiscordWin3::implementation
     void MainWindow::OnToggleDeafen(IInspectable const&, RoutedEventArgs const&)
     {
         m_selfDeaf = !m_selfDeaf;
+        if (!m_voiceChannel.empty()) Voice::Play(m_selfDeaf ? Voice::Sound::Deafen : Voice::Sound::Undeafen);
         if (m_voice) { m_voice->SetMuted(m_selfMute || m_selfDeaf); m_voice->SetDeafened(m_selfDeaf); }
         if (!m_voiceChannel.empty()) SendVoiceState();
         UpdateVoiceButtons();
@@ -5259,8 +5286,173 @@ namespace winrt::DiscordWin3::implementation
         StatsText().Text(text);
     }
 
+}
+
+namespace winrt::DiscordWin3::implementation
+{
+    // ------------------------------------------------------------------ Go Live (screen share)
+
     void MainWindow::OnShareScreen(IInspectable const&, RoutedEventArgs const&)
     {
-        StatusText().Text(I18n::Tr(I18n::S::ScreenShareSoon));
+        if (m_screen || !m_streamKey.empty())
+        {
+            StopScreenShare(true);
+            return;
+        }
+        StartScreenShare();
+    }
+
+    fire_and_forget MainWindow::StartScreenShare()
+    {
+        auto strong = get_strong();
+        if (m_voiceChannel.empty() || !m_voice || !m_gateway)
+        {
+            StatusText().Text(I18n::Tr(I18n::S::ShareNeedsVoice));
+            co_return;
+        }
+
+        // System picker: whole screens and individual windows, like Discord's source selector.
+        auto hwnd = Microsoft::UI::GetWindowFromWindowId(AppWindow().Id());
+        Windows::Graphics::Capture::GraphicsCaptureItem item{ nullptr };
+        try
+        {
+            item = co_await Voice::ScreenShare::PickAsync(hwnd);
+        }
+        catch (...)
+        {
+        }
+        co_await wil::resume_foreground(m_dispatcher);
+        if (!item || m_voiceChannel.empty()) co_return;
+
+        m_captureItem = item;
+        bool guild = !m_voiceGuild.empty();
+        m_streamKey = guild ? L"guild:" + m_voiceGuild + L":" + m_voiceChannel + L":" + m_selfId
+                            : L"call:" + m_voiceChannel + L":" + m_selfId;
+        m_streamServerId.clear();
+        m_streamToken.clear();
+        m_streamEndpoint.clear();
+
+        JsonObject create;
+        create.Insert(L"type", JsonValue::CreateStringValue(guild ? L"guild" : L"call"));
+        create.Insert(L"guild_id", guild ? JsonValue::CreateStringValue(m_voiceGuild) : JsonValue::CreateNullValue());
+        create.Insert(L"channel_id", JsonValue::CreateStringValue(m_voiceChannel));
+        create.Insert(L"preferred_region", JsonValue::CreateNullValue());
+        m_gateway->SendOp(18, create);
+
+        JsonObject unpause;
+        unpause.Insert(L"stream_key", JsonValue::CreateStringValue(m_streamKey));
+        unpause.Insert(L"paused", JsonValue::CreateBooleanValue(false));
+        m_gateway->SendOp(22, unpause);
+
+        CallShareButton().Background(SolidBrush(0x5865F2));
+        ToolTipService::SetToolTip(CallShareButton(), box_value(I18n::Tr(I18n::S::StopSharing)));
+    }
+
+    void MainWindow::OnStreamEvent(std::wstring const& type, Slim::Value const& d)
+    {
+        auto key = Json::Str(d, L"stream_key");
+        if (key.empty() || key != m_streamKey) return;   // someone else's stream (watching comes later)
+
+        if (type == L"STREAM_CREATE")
+        {
+            m_streamServerId = Json::Str(d, L"rtc_server_id");
+            TryStartStream();
+        }
+        else if (type == L"STREAM_SERVER_UPDATE")
+        {
+            m_streamToken = Json::Str(d, L"token");
+            m_streamEndpoint = Json::Str(d, L"endpoint");
+            TryStartStream();
+        }
+        else if (type == L"STREAM_DELETE")
+        {
+            StopScreenShare(false);   // ended by Discord (moderator, server change...)
+        }
+    }
+
+    void MainWindow::TryStartStream()
+    {
+        if (m_stream || m_streamServerId.empty() || m_streamToken.empty() || m_streamEndpoint.empty() || !m_captureItem) return;
+
+        Voice::VoiceParams params;
+        params.serverId = m_streamServerId;
+        params.channelId = m_voiceChannel;
+        params.userId = m_selfId;
+        params.sessionId = m_voiceSession;
+        params.token = m_streamToken;
+        params.endpoint = m_streamEndpoint;
+        params.stream = true;
+        params.daveGroupId = std::to_wstring(Json::U64(m_streamServerId) - 1);   // stream MLS group = rtc_server_id - 1
+
+        auto weak = get_weak();
+        auto dq = m_dispatcher;
+        Voice::VoiceConnection::Callbacks cb;
+        cb.onState = [weak, dq](Voice::VoiceConnection::State state, std::wstring const& detail)
+        {
+            dq.TryEnqueue([weak, state, detail]()
+            {
+                auto self = weak.get();
+                if (!self || !self->m_stream) return;
+                if (state == Voice::VoiceConnection::State::Connected)
+                {
+                    // Stream transport is up: start capturing + encoding into it.
+                    std::weak_ptr<Voice::VoiceConnection> stream = self->m_stream;
+                    self->m_screen = std::make_unique<Voice::ScreenShare>();
+                    bool ok = self->m_screen->Start(self->m_captureItem, [stream](uint8_t const* data, size_t length, uint32_t timestamp)
+                    {
+                        if (auto s = stream.lock()) s->SendVideoFrame(data, length, timestamp);
+                    });
+                    if (!ok)
+                    {
+                        self->StatusText().Text(I18n::Fmt(I18n::S::VoiceFailed, self->m_screen->Error()));
+                        self->StopScreenShare(true);
+                        return;
+                    }
+                    if (!self->m_selfDeaf) Voice::Play(Voice::Sound::StreamStart);
+                    self->CallTitle().Text(self->CallTitle().Text() + L"  •  " + I18n::Tr(I18n::S::Live));
+                }
+                else if (state == Voice::VoiceConnection::State::Failed)
+                {
+                    self->StatusText().Text(I18n::Fmt(I18n::S::VoiceFailed, detail));
+                    self->StopScreenShare(true);
+                }
+            });
+        };
+        m_stream = std::make_shared<Voice::VoiceConnection>(std::move(params), std::move(cb));
+        m_stream->Start();
+    }
+
+    void MainWindow::StopScreenShare(bool notifyServer)
+    {
+        bool wasLive = m_screen && m_screen->Running();
+        if (m_screen)
+        {
+            m_screen->Stop();
+            m_screen.reset();
+        }
+        if (m_stream)
+        {
+            m_stream->Stop();
+            m_stream.reset();
+        }
+        if (notifyServer && !m_streamKey.empty() && m_gateway)
+        {
+            JsonObject del;
+            del.Insert(L"stream_key", JsonValue::CreateStringValue(m_streamKey));
+            m_gateway->SendOp(19, del);
+        }
+        m_streamKey.clear();
+        m_streamServerId.clear();
+        m_streamToken.clear();
+        m_streamEndpoint.clear();
+        m_captureItem = nullptr;
+        if (wasLive && !m_selfDeaf) Voice::Play(Voice::Sound::StreamStop);
+        CallShareButton().Background(SolidBrush(0x2B2D31));
+        ToolTipService::SetToolTip(CallShareButton(), box_value(I18n::Tr(I18n::S::ShareScreen)));
+        if (m_showingCall)
+        {
+            auto name = m_channelNames.find(m_voiceChannel);
+            CallTitle().Text(name != m_channelNames.end() ? name->second : std::wstring{});
+        }
     }
 }

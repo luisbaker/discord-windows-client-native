@@ -237,12 +237,29 @@ namespace DiscordWin3::Voice
             identify.Insert(L"session_id", JsonValue::CreateStringValue(m_params.sessionId));
             identify.Insert(L"token", JsonValue::CreateStringValue(m_params.token));
             identify.Insert(L"max_dave_protocol_version", JsonValue::CreateNumberValue(daveMaxSupportedProtocolVersion()));
+            if (m_params.stream)
+            {
+                // Go Live: one simulcast layer, type "screen".
+                JsonObject layer;
+                layer.Insert(L"type", JsonValue::CreateStringValue(L"screen"));
+                layer.Insert(L"rid", JsonValue::CreateStringValue(L"100"));
+                layer.Insert(L"quality", JsonValue::CreateNumberValue(100));
+                JsonArray streams;
+                streams.Append(layer);
+                identify.Insert(L"video", JsonValue::CreateBooleanValue(true));
+                identify.Insert(L"streams", streams);
+            }
             SendJson(Identify, identify);
             break;
         }
         case Ready:
         {
             m_ssrc = static_cast<uint32_t>(Json::Num(d, L"ssrc"));
+            if (auto stream = d[L"streams"].At(0); stream.IsObject())
+            {
+                m_videoSsrc = static_cast<uint32_t>(Json::Num(stream, L"ssrc"));
+                m_rtxSsrc = static_cast<uint32_t>(Json::Num(stream, L"rtx_ssrc"));
+            }
             std::string externalIp;
             uint16_t externalPort = 0;
             if (!OpenUdp(Utf8(Json::Str(d, L"ip")), static_cast<uint16_t>(Json::Num(d, L"port")), externalIp, externalPort))
@@ -257,6 +274,27 @@ namespace DiscordWin3::Voice
             JsonObject select;
             select.Insert(L"protocol", JsonValue::CreateStringValue(L"udp"));
             select.Insert(L"data", data);
+            if (m_params.stream)
+            {
+                // Same payload types as the official clients: Opus 120, H.264 101 (RTX 102).
+                JsonObject opus;
+                opus.Insert(L"name", JsonValue::CreateStringValue(L"opus"));
+                opus.Insert(L"type", JsonValue::CreateStringValue(L"audio"));
+                opus.Insert(L"priority", JsonValue::CreateNumberValue(1000));
+                opus.Insert(L"payload_type", JsonValue::CreateNumberValue(120));
+                JsonObject h264;
+                h264.Insert(L"name", JsonValue::CreateStringValue(L"H264"));
+                h264.Insert(L"type", JsonValue::CreateStringValue(L"video"));
+                h264.Insert(L"priority", JsonValue::CreateNumberValue(1000));
+                h264.Insert(L"payload_type", JsonValue::CreateNumberValue(101));
+                h264.Insert(L"rtx_payload_type", JsonValue::CreateNumberValue(102));
+                h264.Insert(L"encode", JsonValue::CreateBooleanValue(true));
+                h264.Insert(L"decode", JsonValue::CreateBooleanValue(true));
+                JsonArray codecs;
+                codecs.Append(opus);
+                codecs.Append(h264);
+                select.Insert(L"codecs", codecs);
+            }
             SendJson(SelectProtocol, select);
             break;
         }
@@ -280,10 +318,49 @@ namespace DiscordWin3::Voice
             // Media is ready: start audio, receiving, speaking indicators and UDP keep-alive.
             m_receiver = std::thread([this] { ReceiveLoop(); });
             std::weak_ptr<VoiceConnection> weak = weak_from_this();
-            m_audio.Start([weak](int16_t const* pcm, bool voiced)
+            if (m_params.stream)
             {
-                if (auto strong = weak.lock()) strong->OnCapturedFrame(pcm, voiced);
-            });
+                // Go Live: declare the video layer (op 12), mark the stream as live (speaking 2 = soundshare).
+                {
+                    std::lock_guard guard{ m_daveLock };
+                    daveEncryptorAssignSsrcToCodec(m_encryptor, m_videoSsrc, DAVE_CODEC_H264);
+                }
+                JsonObject resolution;
+                resolution.Insert(L"type", JsonValue::CreateStringValue(L"fixed"));
+                resolution.Insert(L"width", JsonValue::CreateNumberValue(1280));
+                resolution.Insert(L"height", JsonValue::CreateNumberValue(720));
+                JsonObject layer;
+                layer.Insert(L"type", JsonValue::CreateStringValue(L"video"));
+                layer.Insert(L"rid", JsonValue::CreateStringValue(L"100"));
+                layer.Insert(L"ssrc", JsonValue::CreateNumberValue(m_videoSsrc));
+                layer.Insert(L"active", JsonValue::CreateBooleanValue(true));
+                layer.Insert(L"quality", JsonValue::CreateNumberValue(100));
+                layer.Insert(L"rtx_ssrc", JsonValue::CreateNumberValue(m_rtxSsrc));
+                layer.Insert(L"max_bitrate", JsonValue::CreateNumberValue(4000000));
+                layer.Insert(L"max_framerate", JsonValue::CreateNumberValue(30));
+                layer.Insert(L"max_resolution", resolution);
+                JsonArray layers;
+                layers.Append(layer);
+                JsonObject video;
+                video.Insert(L"audio_ssrc", JsonValue::CreateNumberValue(m_ssrc));
+                video.Insert(L"video_ssrc", JsonValue::CreateNumberValue(m_videoSsrc));
+                video.Insert(L"rtx_ssrc", JsonValue::CreateNumberValue(m_rtxSsrc));
+                video.Insert(L"streams", layers);
+                SendJson(12, video);
+                JsonObject speaking;
+                speaking.Insert(L"speaking", JsonValue::CreateNumberValue(2));
+                speaking.Insert(L"delay", JsonValue::CreateNumberValue(0));
+                speaking.Insert(L"ssrc", JsonValue::CreateNumberValue(m_ssrc));
+                SendJson(Speaking, speaking);
+                m_videoReady = true;
+            }
+            else
+            {
+                m_audio.Start([weak](int16_t const* pcm, bool voiced)
+                {
+                    if (auto strong = weak.lock()) strong->OnCapturedFrame(pcm, voiced);
+                });
+            }
             m_ticker = ThreadPoolTimer::CreatePeriodicTimer([weak](ThreadPoolTimer const&)
             {
                 auto strong = weak.lock();
@@ -475,7 +552,8 @@ namespace DiscordWin3::Voice
         // (re)join the MLS group: fresh session state + new key package.
         if (m_daveVersion == 0) return;
         daveSessionReset(m_dave);
-        daveSessionInit(m_dave, m_daveVersion, Json::U64(m_params.channelId), m_userIdUtf8.c_str());
+        daveSessionInit(m_dave, m_daveVersion, Json::U64(m_params.daveGroupId.empty() ? m_params.channelId : m_params.daveGroupId),
+                        m_userIdUtf8.c_str());
         if (!m_externalSender.empty()) daveSessionSetExternalSender(m_dave, m_externalSender.data(), m_externalSender.size());
         DaveSendKeyPackage();
     }
@@ -804,5 +882,115 @@ namespace DiscordWin3::Voice
             s.daveReady = m_encryptor && daveEncryptorHasKeyRatchet(m_encryptor) && !daveEncryptorIsPassthroughMode(m_encryptor);
         }
         return s;
+    }
+}
+
+namespace DiscordWin3::Voice
+{
+    // ------------------------------------------------------------------ Go Live video
+
+    void VoiceConnection::SendRtp(uint8_t const* header, size_t headerLength, uint8_t const* payload, size_t payloadLength)
+    {
+        // rtpsize AEAD: header (+ extension header) authenticated, payload encrypted, tag, 32-bit nonce.
+        std::vector<uint8_t> packet(headerLength + payloadLength + 16 + 4);
+        memcpy(packet.data(), header, headerLength);
+        uint8_t nonce[12]{};
+        uint32_t counter = m_nonce++;
+        PutU32(nonce, counter);
+        uint8_t* cipher = packet.data() + headerLength;
+        uint8_t* tag = cipher + payloadLength;
+        if (!m_sendCrypto.Encrypt(nonce, header, headerLength, payload, payloadLength, cipher, tag)) return;
+        PutU32(tag + 16, counter);
+        int total = static_cast<int>(packet.size());
+        if (send(m_udp, reinterpret_cast<char const*>(packet.data()), total, 0) == total)
+        {
+            ++m_packetsSent;
+            m_bytesSent += static_cast<uint64_t>(total);
+        }
+    }
+
+    void VoiceConnection::SendVideoFrame(uint8_t const* frame, size_t length, uint32_t timestamp90k)
+    {
+        if (!m_videoReady || m_stopped || m_udp == INVALID_SOCKET || !m_sendCrypto.HasKey() || length == 0) return;
+        std::lock_guard videoGuard{ m_videoLock };
+
+        // 1) DAVE on the whole access unit (libdave keeps start codes / NAL headers in clear for the packetizer).
+        std::vector<uint8_t> e2ee;
+        size_t e2eeLength = 0;
+        {
+            std::lock_guard guard{ m_daveLock };
+            e2ee.resize(daveEncryptorGetMaxCiphertextByteSize(m_encryptor, DAVE_MEDIA_TYPE_VIDEO, length) + 64);
+            if (daveEncryptorEncrypt(m_encryptor, DAVE_MEDIA_TYPE_VIDEO, m_videoSsrc, frame, length, e2ee.data(), e2ee.size(), &e2eeLength)
+                != DAVE_ENCRYPTOR_RESULT_CODE_SUCCESS)
+            {
+                ++m_e2eeEncryptSkipped;
+                return;
+            }
+        }
+
+        // 2) Split on Annex B start codes.
+        std::vector<std::pair<size_t, size_t>> nals;   // (offset, length) without start code
+        size_t i = 0, start = SIZE_MAX;
+        while (i + 3 <= e2eeLength)
+        {
+            bool sc3 = e2ee[i] == 0 && e2ee[i + 1] == 0 && e2ee[i + 2] == 1;
+            bool sc4 = i + 4 <= e2eeLength && e2ee[i] == 0 && e2ee[i + 1] == 0 && e2ee[i + 2] == 0 && e2ee[i + 3] == 1;
+            if (sc3 || sc4)
+            {
+                if (start != SIZE_MAX) nals.emplace_back(start, i - start);
+                i += sc4 ? 4 : 3;
+                start = i;
+                continue;
+            }
+            ++i;
+        }
+        if (start != SIZE_MAX && start < e2eeLength) nals.emplace_back(start, e2eeLength - start);
+        if (nals.empty()) return;
+
+        // 3) RTP: H.264 payload type 101, packetization-mode 1 (single NAL / FU-A), playout-delay extension (id 5).
+        constexpr size_t Mtu = 1200;
+        auto makeHeader = [&](uint8_t* h, bool marker)
+        {
+            h[0] = 0x90;                                       // V=2, X=1
+            h[1] = static_cast<uint8_t>((marker ? 0x80 : 0) | 101);
+            PutU16(h + 2, m_videoSeq++);
+            PutU32(h + 4, timestamp90k);
+            PutU32(h + 8, m_videoSsrc);
+            h[12] = 0xBE; h[13] = 0xDE; h[14] = 0x00; h[15] = 0x01;   // one-byte extensions, 1 word
+        };
+        static constexpr uint8_t PlayoutDelay[4] = { 0x51, 0x00, 0x00, 0x00 };   // id 5, len 2, min=max=0
+
+        std::vector<uint8_t> payload;
+        payload.reserve(Mtu + 8);
+        for (size_t n = 0; n < nals.size(); ++n)
+        {
+            auto [offset, size] = nals[n];
+            if (size == 0) continue;
+            bool lastNal = n + 1 == nals.size();
+            uint8_t const* nal = e2ee.data() + offset;
+            uint8_t header[16];
+            if (size <= Mtu)
+            {
+                makeHeader(header, lastNal);
+                payload.assign(PlayoutDelay, PlayoutDelay + 4);
+                payload.insert(payload.end(), nal, nal + size);
+                SendRtp(header, sizeof(header), payload.data(), payload.size());
+                continue;
+            }
+            uint8_t indicator = static_cast<uint8_t>((nal[0] & 0xE0) | 28);
+            uint8_t type = nal[0] & 0x1F;
+            for (size_t pos = 1; pos < size; pos += Mtu)
+            {
+                size_t chunk = std::min(Mtu, size - pos);
+                bool first = pos == 1;
+                bool lastChunk = pos + chunk >= size;
+                makeHeader(header, lastNal && lastChunk);
+                payload.assign(PlayoutDelay, PlayoutDelay + 4);
+                payload.push_back(indicator);
+                payload.push_back(static_cast<uint8_t>((first ? 0x80 : 0) | (lastChunk ? 0x40 : 0) | type));
+                payload.insert(payload.end(), nal + pos, nal + pos + chunk);
+                SendRtp(header, sizeof(header), payload.data(), payload.size());
+            }
+        }
     }
 }
