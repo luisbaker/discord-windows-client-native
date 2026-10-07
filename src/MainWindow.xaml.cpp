@@ -25,6 +25,7 @@ namespace Discord = ::DiscordWin3::Discord;
 using ::DiscordWin3::MessageData;
 namespace I18n = ::DiscordWin3::I18n;
 namespace Slim = ::DiscordWin3::Slim;
+namespace Voice = ::DiscordWin3::Voice;
 
 namespace winrt::DiscordWin3::implementation
 {
@@ -374,6 +375,7 @@ namespace winrt::DiscordWin3::implementation
             {
                 if (self->m_gateway) self->m_gateway->Stop();
                 if (self->m_remoteAuth) self->m_remoteAuth->Stop();
+                if (self->m_voice) self->m_voice->Stop();
             }
         });
 
@@ -774,6 +776,7 @@ namespace winrt::DiscordWin3::implementation
 
     void MainWindow::EndSession()
     {
+        LeaveVoice();
         if (m_gateway)
         {
             m_gateway->Stop();
@@ -942,6 +945,7 @@ namespace winrt::DiscordWin3::implementation
         }
         else if (type == L"VOICE_STATE_UPDATE")
         {
+            if (Json::Str(d, L"user_id") == m_selfId) OnOwnVoiceState(d);
             auto guild = FindGuild(Json::Str(d, L"guild_id"));
             if (!guild)
             {
@@ -952,6 +956,10 @@ namespace winrt::DiscordWin3::implementation
             {
                 RefreshChannelList();
             }
+        }
+        else if (type == L"VOICE_SERVER_UPDATE")
+        {
+            OnVoiceServerUpdate(d);
         }
         else if (type == L"GUILD_CREATE")
         {
@@ -1452,8 +1460,10 @@ namespace winrt::DiscordWin3::implementation
                             : user != m_users.end() ? user->second.name : L"…";
                         std::wstring avatar = member != members.end() && !member->second.avatarUrl.empty() ? member->second.avatarUrl
                             : user != m_users.end() ? user->second.avatarUrl : DefaultAvatar(userId, L"0");
-                        items.push_back(make<ChannelItem>(hstring{ L"voice:" + userId }, hstring{ name }, L"",
-                                                          ChannelKind::VoiceUser, avatar));
+                        auto voiceItem = make_self<ChannelItem>(hstring{ L"voice:" + userId }, hstring{ name }, L"",
+                                                                ChannelKind::VoiceUser, avatar);
+                        voiceItem->SetSpeaking(m_speakingUsers.contains(userId));
+                        items.push_back(voiceItem.as<IInspectable>());
                     }
                 }
             };
@@ -1533,7 +1543,7 @@ namespace winrt::DiscordWin3::implementation
         {
             if (!item.IsCategory() && !item.IsVoiceUser())
             {
-                StatusText().Text(I18n::Tr(I18n::S::VoiceSoon));
+                JoinVoice(m_currentGuildId, std::wstring{ item.Id() });   // voice / stage channel: join the call
             }
             // Keep the highlight on the channel that is actually open.
             for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
@@ -1554,6 +1564,7 @@ namespace winrt::DiscordWin3::implementation
         ChannelGlyph().Visibility(Show(!hasAvatar));
         ChannelAvatarBorder().Visibility(Show(hasAvatar));
         ChannelAvatar().Source(hasAvatar ? item.Avatar() : nullptr);
+        CallButton().Visibility(Show(m_currentGuildId == HomeId));
         ShowFriends(false);
         LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Name() });
         Composer().PlaceholderText(I18n::Fmt(m_currentGuildId == HomeId ? I18n::S::SendMessageTo : I18n::S::SendMessageIn,
@@ -3974,6 +3985,7 @@ namespace winrt::DiscordWin3::implementation
         tip(ComposerEmojiButton(), S::PickEmoji);
         tip(CancelReplyButton(), S::CancelEsc);
         tip(SettingsButton(), S::Settings);
+        UpdateVoiceButtons();
         tip(QuickSwitchButton(), S::QuickSwitch);
     }
 
@@ -4877,6 +4889,209 @@ namespace winrt::DiscordWin3::implementation
         }
         catch (...)
         {
+        }
+    }
+}
+
+namespace winrt::DiscordWin3::implementation
+{
+    // ------------------------------------------------------------------ voice
+
+    void MainWindow::SendVoiceState()
+    {
+        if (!m_gateway) return;
+        JsonObject d;
+        d.Insert(L"guild_id", m_voiceGuild.empty() ? JsonValue::CreateNullValue() : JsonValue::CreateStringValue(m_voiceGuild));
+        d.Insert(L"channel_id", m_voiceChannel.empty() ? JsonValue::CreateNullValue() : JsonValue::CreateStringValue(m_voiceChannel));
+        d.Insert(L"self_mute", JsonValue::CreateBooleanValue(m_selfMute || m_selfDeaf));
+        d.Insert(L"self_deaf", JsonValue::CreateBooleanValue(m_selfDeaf));
+        d.Insert(L"self_video", JsonValue::CreateBooleanValue(false));
+        m_gateway->SendOp(4, d);
+    }
+
+    void MainWindow::JoinVoice(std::wstring guildId, std::wstring channelId)
+    {
+        if (channelId.empty() || (channelId == m_voiceChannel && m_voice)) return;
+        if (!m_voiceChannel.empty()) LeaveVoice();
+
+        m_voiceGuild = std::move(guildId);
+        m_voiceChannel = std::move(channelId);
+        m_voiceSession.clear();
+        m_voiceToken.clear();
+        m_voiceEndpoint.clear();
+        SendVoiceState();
+
+        auto name = m_channelNames.find(m_voiceChannel);
+        auto guild = FindGuild(m_voiceGuild);
+        VoiceChannelText().Text((name != m_channelNames.end() ? name->second : std::wstring{}) +
+                                (guild ? L" / " + guild->name : std::wstring{}));
+        VoiceStatusText().Text(I18n::Tr(I18n::S::VoiceConnecting));
+        VoiceStatusText().Foreground(SolidBrush(0xF0B232));
+        VoicePanel().Visibility(Visibility::Visible);
+    }
+
+    void MainWindow::LeaveVoice()
+    {
+        if (m_voice)
+        {
+            m_voice->Stop();
+            m_voice.reset();
+        }
+        if (!m_voiceChannel.empty())
+        {
+            m_voiceChannel.clear();
+            SendVoiceState();   // channel_id: null = disconnect
+        }
+        m_voiceGuild.clear();
+        m_voiceSession.clear();
+        m_voiceToken.clear();
+        m_voiceEndpoint.clear();
+        auto speaking = std::move(m_speakingUsers);
+        m_speakingUsers.clear();
+        for (auto const& user : speaking) UpdateVoiceUserRow(user);
+        VoicePanel().Visibility(Visibility::Collapsed);
+    }
+
+    void MainWindow::OnOwnVoiceState(Slim::Value const& d)
+    {
+        auto channel = Json::Str(d, L"channel_id");
+        if (channel.empty())
+        {
+            // Disconnected by a moderator or from another device.
+            if (m_voice) { m_voice->Stop(); m_voice.reset(); }
+            m_voiceChannel.clear();
+            VoicePanel().Visibility(Visibility::Collapsed);
+            return;
+        }
+        if (channel != m_voiceChannel) return;   // a call on another device
+        m_voiceSession = Json::Str(d, L"session_id");
+        TryStartVoice();
+    }
+
+    void MainWindow::OnVoiceServerUpdate(Slim::Value const& d)
+    {
+        if (m_voiceChannel.empty()) return;
+        // Server moved (region change / failover): reconnect to the new one.
+        if (m_voice)
+        {
+            m_voice->Stop();
+            m_voice.reset();
+        }
+        m_voiceToken = Json::Str(d, L"token");
+        m_voiceEndpoint = Json::Str(d, L"endpoint");   // null while Discord allocates a server
+        TryStartVoice();
+    }
+
+    void MainWindow::TryStartVoice()
+    {
+        if (m_voice || m_voiceChannel.empty() || m_voiceSession.empty() || m_voiceToken.empty() || m_voiceEndpoint.empty()) return;
+
+        Voice::VoiceParams params;
+        params.serverId = m_voiceGuild.empty() ? m_voiceChannel : m_voiceGuild;
+        params.channelId = m_voiceChannel;
+        params.userId = m_selfId;
+        params.sessionId = m_voiceSession;
+        params.token = m_voiceToken;
+        params.endpoint = m_voiceEndpoint;
+
+        auto weak = get_weak();
+        auto dq = m_dispatcher;
+        Voice::VoiceConnection::Callbacks cb;
+        cb.onState = [weak, dq](Voice::VoiceConnection::State state, std::wstring const& detail)
+        {
+            dq.TryEnqueue([weak, state, detail]()
+            {
+                auto self = weak.get();
+                if (!self || self->m_voiceChannel.empty()) return;
+                using State = Voice::VoiceConnection::State;
+                if (state == State::Connected)
+                {
+                    self->VoiceStatusText().Text(I18n::Tr(I18n::S::VoiceConnected));
+                    self->VoiceStatusText().Foreground(SolidBrush(0x23A55A));
+                }
+                else if (state == State::Failed)
+                {
+                    self->VoiceStatusText().Text(I18n::Fmt(I18n::S::VoiceFailed, detail));
+                    self->VoiceStatusText().Foreground(SolidBrush(0xF23F43));
+                    if (self->m_voice) { self->m_voice->Stop(); self->m_voice.reset(); }
+                }
+            });
+        };
+        cb.onSpeaking = [weak, dq](std::wstring const& userId, bool speaking)
+        {
+            dq.TryEnqueue([weak, userId, speaking]()
+            {
+                auto self = weak.get();
+                if (!self) return;
+                if (speaking) self->m_speakingUsers.insert(userId);
+                else self->m_speakingUsers.erase(userId);
+                self->UpdateVoiceUserRow(userId);
+            });
+        };
+
+        m_voice = std::make_shared<Voice::VoiceConnection>(std::move(params), std::move(cb));
+        m_voice->SetMuted(m_selfMute || m_selfDeaf);
+        m_voice->SetDeafened(m_selfDeaf);
+        m_voice->Start();
+    }
+
+    void MainWindow::UpdateVoiceUserRow(std::wstring const& userId)
+    {
+        std::wstring id = L"voice:" + userId;
+        for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
+        {
+            auto existing = get_self<implementation::ChannelItem>(m_channelItems.GetAt(i).as<DiscordWin3::ChannelItem>());
+            if (existing->Id() != id) continue;
+            auto item = make_self<ChannelItem>(existing->Id(), existing->Name(), existing->Glyph(), existing->Kind(), existing->AvatarUrl());
+            item->SetSpeaking(m_speakingUsers.contains(userId));
+            m_channelItems.SetAt(i, item.as<IInspectable>());
+            return;
+        }
+    }
+
+    void MainWindow::UpdateVoiceButtons()
+    {
+        MuteIcon().Foreground(m_selfMute || m_selfDeaf ? SolidBrush(0xF23F43) : SolidBrush(0xDBDEE1));
+        DeafenIcon().Foreground(m_selfDeaf ? SolidBrush(0xF23F43) : SolidBrush(0xDBDEE1));
+        ToolTipService::SetToolTip(MuteButton(), box_value(I18n::Tr(m_selfMute ? I18n::S::UnmuteMic : I18n::S::MuteMic)));
+        ToolTipService::SetToolTip(DeafenButton(), box_value(I18n::Tr(m_selfDeaf ? I18n::S::Undeafen : I18n::S::Deafen)));
+        ToolTipService::SetToolTip(VoiceDisconnectButton(), box_value(I18n::Tr(I18n::S::VoiceDisconnect)));
+        ToolTipService::SetToolTip(CallButton(), box_value(I18n::Tr(I18n::S::StartCall)));
+    }
+
+    void MainWindow::OnToggleMute(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_selfDeaf) m_selfDeaf = false;   // like Discord: unmuting also undeafens
+        m_selfMute = !m_selfMute;
+        if (m_voice) { m_voice->SetMuted(m_selfMute || m_selfDeaf); m_voice->SetDeafened(m_selfDeaf); }
+        if (!m_voiceChannel.empty()) SendVoiceState();
+        UpdateVoiceButtons();
+    }
+
+    void MainWindow::OnToggleDeafen(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_selfDeaf = !m_selfDeaf;
+        if (m_voice) { m_voice->SetMuted(m_selfMute || m_selfDeaf); m_voice->SetDeafened(m_selfDeaf); }
+        if (!m_voiceChannel.empty()) SendVoiceState();
+        UpdateVoiceButtons();
+    }
+
+    void MainWindow::OnVoiceDisconnect(IInspectable const&, RoutedEventArgs const&)
+    {
+        LeaveVoice();
+    }
+
+    void MainWindow::OnStartCall(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_currentGuildId != HomeId || m_currentChannelId.empty()) return;
+        auto channel = m_currentChannelId;
+        JoinVoice(L"", channel);
+        // Ring the other side(s), like pressing the phone icon in the official client.
+        if (m_rest)
+        {
+            JsonObject body;
+            body.Insert(L"recipients", JsonValue::CreateNullValue());
+            m_rest->PostJson(L"/channels/" + channel + L"/call/ring", body);
         }
     }
 }

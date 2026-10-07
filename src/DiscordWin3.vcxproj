@@ -2,6 +2,8 @@
 <Project ToolsVersion="Current" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Pkg>$(MSBuildThisFileDirectory)..\packages\</Pkg>
+    <!-- Voice: OpenSSL / mlspp / Opus / libdave, built by tools\build-voice-deps.ps1 -->
+    <VoiceDeps>$(MSBuildThisFileDirectory)..\deps\</VoiceDeps>
   </PropertyGroup>
 
   <!-- NuGet props (packages.config style, in dependency order) -->
@@ -83,10 +85,12 @@
       <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(VoiceDeps)installed\x64-windows-static-md\include;$(VoiceDeps)libdave\cpp\includes;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>crypt32.lib;bcrypt.lib;shell32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VoiceDeps)installed\x64-windows-static-md\lib;$(VoiceDeps)libdave\cpp\build;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libdave.lib;mlspp.lib;mls_ds.lib;hpke.lib;bytes.lib;tls_syntax.lib;opus.lib;libssl.lib;libcrypto.lib;ws2_32.lib;avrt.lib;crypt32.lib;bcrypt.lib;shell32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -145,6 +149,9 @@
     <ClInclude Include="TokenStore.h" />
     <ClInclude Include="Strings.h" />
     <ClInclude Include="SlimJson.h" />
+    <ClInclude Include="Voice\AesGcm.h" />
+    <ClInclude Include="Voice\AudioEngine.h" />
+    <ClInclude Include="Voice\VoiceConnection.h" />
     <ClInclude Include="MemLog.h" />
     <ClInclude Include="ImageCache.h" />
     <ClInclude Include="third_party\qrcodegen.hpp" />
@@ -168,6 +175,9 @@
     <ClCompile Include="TokenStore.cpp" />
     <ClCompile Include="Strings.cpp" />
     <ClCompile Include="SlimJson.cpp" />
+    <ClCompile Include="Voice\AesGcm.cpp" />
+    <ClCompile Include="Voice\AudioEngine.cpp" />
+    <ClCompile Include="Voice\VoiceConnection.cpp" />
     <ClCompile Include="ImageCache.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="third_party\qrcodegen.cpp">

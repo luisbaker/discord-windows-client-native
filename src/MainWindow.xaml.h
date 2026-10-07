@@ -6,6 +6,7 @@
 #include "Discord/Permissions.h"
 #include "Discord/RemoteAuth.h"
 #include "Discord/Rest.h"
+#include "Voice/VoiceConnection.h"
 
 namespace winrt::DiscordWin3::implementation
 {
@@ -78,6 +79,10 @@ namespace winrt::DiscordWin3::implementation
         void OnCancelReply(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnNavigateBack(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnSettings(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnVoiceDisconnect(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnToggleMute(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnToggleDeafen(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnStartCall(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnPlayVideo(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         fire_and_forget OnDownloadMedia(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnHoverReaction(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -211,6 +216,16 @@ namespace winrt::DiscordWin3::implementation
         void UpdateNavButtons();
         void UpdateTitleBarRegions();
 
+        // Voice (gateway op 4 -> VOICE_STATE_UPDATE + VOICE_SERVER_UPDATE -> VoiceConnection)
+        void JoinVoice(std::wstring guildId, std::wstring channelId);
+        void LeaveVoice();
+        void SendVoiceState();
+        void TryStartVoice();
+        void OnOwnVoiceState(::DiscordWin3::Slim::Value const& d);
+        void OnVoiceServerUpdate(::DiscordWin3::Slim::Value const& d);
+        void UpdateVoiceUserRow(std::wstring const& userId);
+        void UpdateVoiceButtons();
+
         // Translations
         void ApplyTexts();
 
@@ -276,6 +291,11 @@ namespace winrt::DiscordWin3::implementation
         std::wstring m_pendingOpenGuild, m_pendingOpenChannel;
         Microsoft::UI::Xaml::Controls::MenuFlyout m_messageMenu{ nullptr };
         Microsoft::UI::Xaml::Controls::Panel m_videoHome{ nullptr };   // where a fullscreen video came from
+        std::shared_ptr<::DiscordWin3::Voice::VoiceConnection> m_voice;
+        std::wstring m_voiceGuild, m_voiceChannel, m_voiceSession, m_voiceToken, m_voiceEndpoint;
+        bool m_selfMute = false;
+        bool m_selfDeaf = false;
+        std::unordered_set<std::wstring> m_speakingUsers;
 
         struct Presence { std::wstring status; std::wstring activity; std::wstring game; bool hasActivity = false; };
         std::unordered_map<std::wstring, Presence> m_presence;            // userId -> presence (friends + DMs)

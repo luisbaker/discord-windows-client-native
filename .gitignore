@@ -13,3 +13,6 @@ tools/nuget.exe
 # Never commit credentials
 token.bin
 *.token
+
+# Native voice dependencies (tools/build-voice-deps.ps1)
+deps/

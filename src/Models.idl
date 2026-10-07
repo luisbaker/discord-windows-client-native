@@ -27,6 +27,7 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
         Microsoft.UI.Xaml.Visibility AvatarVisibility { get; };
         Double AvatarSize { get; };
+        Microsoft.UI.Xaml.Media.Brush AvatarRing { get; };
         Microsoft.UI.Xaml.Media.Brush StatusBrush { get; };
         Microsoft.UI.Xaml.Visibility StatusVisibility { get; };
         String Subtitle { get; };

@@ -120,7 +120,16 @@
     X(MarkSpoiler, L"Définir comme spoiler", L"Mark as spoiler", L"Marcar como spoiler", L"Marcar como spoiler", L"Marcar como spoiler", L"Als Spoiler markieren", L"Segna come spoiler") \
     X(PickEmoji, L"Choisir un emoji", L"Select emoji", L"Escolher emoji", L"Escolher emoji", L"Elegir emoji", L"Emoji auswählen", L"Scegli emoji") \
     X(ServerEmojis, L"Emojis du serveur", L"Server Emojis", L"Emojis do servidor", L"Emojis do servidor", L"Emojis del servidor", L"Server-Emojis", L"Emoji del server") \
-    X(FrequentEmojis, L"Les plus utilisés", L"Frequently Used", L"Mais usados", L"Mais usados", L"Más usados", L"Häufig verwendet", L"Più usati")
+    X(FrequentEmojis, L"Les plus utilisés", L"Frequently Used", L"Mais usados", L"Mais usados", L"Más usados", L"Häufig verwendet", L"Più usati") \
+    X(VoiceConnecting, L"Connexion au vocal…", L"Connecting to voice…", L"A ligar à voz…", L"Conectando à voz…", L"Conectando a voz…", L"Verbinde mit Sprachkanal…", L"Connessione alla voce…") \
+    X(VoiceConnected, L"Connecté au vocal", L"Voice Connected", L"Voz ligada", L"Voz conectada", L"Voz conectada", L"Sprachverbindung steht", L"Voce connessa") \
+    X(VoiceFailed, L"Échec de la connexion vocale : {0}", L"Voice connection failed: {0}", L"Falha na ligação de voz: {0}", L"Falha na conexão de voz: {0}", L"Error en la conexión de voz: {0}", L"Sprachverbindung fehlgeschlagen: {0}", L"Connessione vocale non riuscita: {0}") \
+    X(VoiceDisconnect, L"Se déconnecter", L"Disconnect", L"Desligar", L"Desconectar", L"Desconectar", L"Trennen", L"Disconnetti") \
+    X(MuteMic, L"Rendre muet", L"Mute", L"Silenciar", L"Silenciar", L"Silenciar", L"Stummschalten", L"Silenzia") \
+    X(UnmuteMic, L"Réactiver le micro", L"Unmute", L"Ativar microfone", L"Ativar microfone", L"Activar micrófono", L"Stummschaltung aufheben", L"Riattiva microfono") \
+    X(Deafen, L"Mettre en sourdine", L"Deafen", L"Desativar som", L"Desativar áudio", L"Ensordecer", L"Taub schalten", L"Disattiva audio") \
+    X(Undeafen, L"Réactiver le son", L"Undeafen", L"Ativar som", L"Ativar áudio", L"Activar audio", L"Ton einschalten", L"Riattiva audio") \
+    X(StartCall, L"Démarrer un appel vocal", L"Start Voice Call", L"Iniciar chamada de voz", L"Iniciar chamada de voz", L"Iniciar llamada de voz", L"Sprachanruf starten", L"Avvia chiamata vocale")
 
 namespace DiscordWin3::I18n
 {

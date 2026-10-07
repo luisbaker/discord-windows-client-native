@@ -128,6 +128,9 @@ namespace winrt::DiscordWin3::implementation
 
         // DMs only: presence dot + activity line (set once, before the item is shown).
         void SetPresence(uint32_t statusColor, std::wstring subtitle) { m_statusColor = statusColor; m_subtitle = std::move(subtitle); }
+        void SetSpeaking(bool speaking) { m_speaking = speaking; }
+        bool Speaking() const { return m_speaking; }
+        Brush AvatarRing() const { return m_speaking ? SolidBrush(0x23A55A) : SolidBrush(0, 0); }
         uint32_t StatusColor() const { return m_statusColor; }
         std::wstring const& SubtitleText() const { return m_subtitle; }
         double AvatarSize() const { return IsVoiceUser() ? 24.0 : 32.0; }
@@ -158,6 +161,7 @@ namespace winrt::DiscordWin3::implementation
         int m_mentions;
         uint32_t m_statusColor = 0;
         std::wstring m_subtitle;
+        bool m_speaking = false;
     };
 
     struct FriendItem : FriendItemT<FriendItem>
