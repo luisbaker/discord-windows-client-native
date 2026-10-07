@@ -129,3 +129,19 @@ namespace DiscordWin3::Discord
         throw hresult_error(E_FAIL, L"HTTP 429: rate limited");
     }
 }
+
+namespace DiscordWin3::Discord
+{
+    IAsyncOperation<IJsonValue> Rest::Call(HttpMethod method, std::wstring path, JsonObject body)
+    {
+        if (!body)
+        {
+            return Send(method, std::move(path), nullptr);
+        }
+        auto text = body.Stringify();
+        return Send(method, std::move(path), [text]() -> IHttpContent
+        {
+            return HttpStringContent{ text, Windows::Storage::Streams::UnicodeEncoding::Utf8, L"application/json" };
+        });
+    }
+}

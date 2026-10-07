@@ -11,6 +11,9 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Media.ImageSource Icon { get; };
         Microsoft.UI.Xaml.Visibility IconVisibility { get; };
         Microsoft.UI.Xaml.Visibility InitialsVisibility { get; };
+        Microsoft.UI.Xaml.Visibility UnreadVisibility { get; };
+        String MentionText { get; };
+        Microsoft.UI.Xaml.Visibility MentionVisibility { get; };
     }
 
     runtimeclass ChannelItem
@@ -28,6 +31,10 @@ namespace DiscordWin3
         Double TextOpacity { get; };
         Microsoft.UI.Xaml.Visibility CategoryVisibility { get; };
         Microsoft.UI.Xaml.Visibility ChannelVisibility { get; };
+        Microsoft.UI.Xaml.Media.Brush NameBrush { get; };
+        Windows.UI.Text.FontWeight NameWeight { get; };
+        String MentionText { get; };
+        Microsoft.UI.Xaml.Visibility MentionVisibility { get; };
     }
 
     runtimeclass MessageItem
@@ -43,6 +50,7 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Thickness RowPadding { get; };
         Microsoft.UI.Xaml.Media.Brush RowBackground { get; };
         Microsoft.UI.Xaml.Visibility ContentVisibility { get; };
+        Microsoft.UI.Xaml.Visibility ReactionsVisibility { get; };
         Microsoft.UI.Xaml.Visibility DayVisibility { get; };
         String DayText { get; };
         String TagText { get; };

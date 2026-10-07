@@ -21,6 +21,9 @@ namespace DiscordWin3::Discord
             std::wstring path, winrt::Windows::Data::Json::JsonObject body);
         winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Data::Json::IJsonValue> PostContent(
             std::wstring path, winrt::Windows::Web::Http::IHttpContent content);
+        // Any verb (PUT / PATCH / DELETE...), JSON body optional.
+        winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Data::Json::IJsonValue> Call(
+            winrt::Windows::Web::Http::HttpMethod method, std::wstring path, winrt::Windows::Data::Json::JsonObject body = nullptr);
 
     private:
         winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Data::Json::IJsonValue> Send(

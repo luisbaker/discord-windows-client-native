@@ -72,6 +72,7 @@ namespace winrt::DiscordWin3::implementation
         void OnComposerKeyDown(IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
         void OnTokenLogin(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnQrRetry(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnCancelReply(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
     private:
         // Session
@@ -123,6 +124,7 @@ namespace winrt::DiscordWin3::implementation
         void AnimateMessagesIn();
 
         void SetBackgroundMode(bool background);
+        void ApplyPowerPolicy();   // Energy Saver / "animation effects" -> no animations + EcoQoS
 
         // Member list sidebar (op 37 -> GUILD_MEMBER_LIST_UPDATE)
         void SubscribeMembers();
@@ -134,6 +136,39 @@ namespace winrt::DiscordWin3::implementation
         void UpdateTypingText();
 
         void UpdateTitle();
+
+        // Unread state (READY read_state + user_guild_settings, kept live by MESSAGE_CREATE / MESSAGE_ACK)
+        void ParseReadStates(Windows::Data::Json::JsonObject const& d);
+        void ParseGuildSettings(Windows::Data::Json::IJsonValue const& settings);
+        bool IsUnread(ChannelInfo const& channel) const;
+        int MentionsIn(std::wstring const& channelId) const;
+        std::pair<bool, int> GuildBadge(GuildInfo const& guild) const;
+        std::pair<bool, int> HomeBadge() const;
+        IInspectable MakeGuildItem(GuildInfo const& guild) const;
+        void UpdateGuildRow(std::wstring const& guildId);
+        void UpdateChannelRow(std::wstring const& channelId);
+        ChannelInfo* FindChannel(std::wstring const& channelId, std::wstring* guildId = nullptr);
+        void OnMessageForUnread(Windows::Data::Json::JsonObject const& d, ::DiscordWin3::MessageData const* data);
+        void Ack(std::wstring const& channelId, std::wstring const& messageId);
+        void OnRemoteAck(Windows::Data::Json::JsonObject const& d);
+
+        // Reactions
+        void RenderReactions(Microsoft::UI::Xaml::Controls::StackPanel const& panel, ::DiscordWin3::MessageData const& data);
+        fire_and_forget ToggleReaction(std::wstring messageId, ::DiscordWin3::Reaction reaction);
+        void OnReactionEvent(std::wstring const& type, Windows::Data::Json::JsonObject const& d);
+
+        // Message actions (context menu, reply, edit, delete)
+        void OnMessageMenuOpening(IInspectable const& sender);
+        void StartReply(::DiscordWin3::MessageData const& data);
+        void StartEdit(::DiscordWin3::MessageData const& data);
+        void ClearComposerMode();
+        fire_and_forget DeleteMessage(std::wstring messageId);
+        bool EditLastOwnMessage();
+
+        // Notifications
+        void InitNotifications();
+        void Notify(::DiscordWin3::MessageData const& data, std::wstring const& channelId, std::wstring const& guildId);
+        void OpenChannel(std::wstring const& guildId, std::wstring const& channelId);
         fire_and_forget UploadFile(std::wstring path);
 
         std::wstring m_token;
@@ -157,12 +192,29 @@ namespace winrt::DiscordWin3::implementation
         bool m_loadingOlder = false;
         bool m_hasMoreOlder = false;
         bool m_background = false;
+        bool m_energySaver = false;
+        bool m_reduceMotion = false;
+        Windows::UI::ViewManagement::UISettings m_uiSettings{ nullptr };
         std::unordered_set<std::wstring> m_collapsed;                  // collapsed category ids
         std::wstring m_memberListGuild;
         std::unordered_map<std::wstring, int> m_memberGroupCounts;
         std::unordered_map<std::wstring, std::pair<int64_t, std::wstring>> m_typing;  // userId -> (expiry ms, name)
         Microsoft::UI::Dispatching::DispatcherQueueTimer m_typingTimer{ nullptr };
         int64_t m_lastTypingSent = 0;
+
+        struct ReadState { std::wstring lastRead; int mentions = 0; };
+        std::unordered_map<std::wstring, ReadState> m_readStates;      // channelId -> state
+        std::unordered_set<std::wstring> m_mutedGuilds;
+        std::unordered_set<std::wstring> m_mutedChannels;
+        std::unordered_map<std::wstring, std::wstring> m_channelGuild; // channelId -> guildId
+        std::wstring m_replyToId;
+        std::wstring m_editingId;
+        bool m_windowActive = true;
+        bool m_notificationsReady = false;
+        std::wstring m_pendingOpenGuild, m_pendingOpenChannel;
+        Microsoft::UI::Xaml::Controls::MenuFlyout m_messageMenu{ nullptr };
+        std::wstring m_ackChannel, m_ackMessage;
+        bool m_ackScheduled = false;
 
         Windows::Foundation::Collections::IObservableVector<IInspectable> m_guildItems =
             single_threaded_observable_vector<IInspectable>();

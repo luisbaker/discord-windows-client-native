@@ -25,9 +25,23 @@ namespace DiscordWin3
         std::wstring url;
     };
 
+    struct Reaction
+    {
+        std::wstring name;   // unicode emoji, or custom emoji name
+        std::wstring id;     // custom emoji id (empty for unicode)
+        int count = 0;
+        bool me = false;
+
+        // "👍" or "name:id", URL-escaped by the caller.
+        std::wstring ApiKey() const { return id.empty() ? name : name + L":" + id; }
+    };
+
     // Plain data handed to the item constructors (kept out of the WinRT surface).
     struct MessageData
     {
+        std::vector<Reaction> reactions;
+        bool edited = false;
+        std::wstring rawContent;  // for editing / copying
         std::wstring id;
         std::wstring authorId;
         std::wstring authorName;
@@ -65,7 +79,7 @@ namespace winrt::DiscordWin3::implementation
 
     struct GuildItem : GuildItemT<GuildItem>
     {
-        GuildItem(hstring id, hstring name, hstring iconUrl);
+        GuildItem(hstring id, hstring name, hstring iconUrl, bool unread = false, int mentions = 0);
 
         hstring Id() const { return m_id; }
         hstring Name() const { return m_name; }
@@ -73,9 +87,14 @@ namespace winrt::DiscordWin3::implementation
         ImageSource Icon();
         Visibility IconVisibility() const { return Show(!m_iconUrl.empty()); }
         Visibility InitialsVisibility() const { return Show(m_iconUrl.empty()); }
+        Visibility UnreadVisibility() const { return Show(m_unread); }
+        hstring MentionText() const { return m_mentions > 99 ? hstring{ L"99+" } : hstring{ std::to_wstring(m_mentions) }; }
+        Visibility MentionVisibility() const { return Show(m_mentions > 0); }
 
     private:
         hstring m_id, m_name, m_initials, m_iconUrl;
+        bool m_unread;
+        int m_mentions;
     };
 
     enum class ChannelKind
@@ -88,8 +107,20 @@ namespace winrt::DiscordWin3::implementation
 
     struct ChannelItem : ChannelItemT<ChannelItem>
     {
-        ChannelItem(hstring id, hstring name, hstring glyph, ChannelKind kind, std::wstring avatarUrl = {})
-            : m_id(id), m_name(name), m_glyph(glyph), m_kind(kind), m_avatarUrl(std::move(avatarUrl)) {}
+        ChannelItem(hstring id, hstring name, hstring glyph, ChannelKind kind, std::wstring avatarUrl = {},
+                    bool unread = false, int mentions = 0)
+            : m_id(id), m_name(name), m_glyph(glyph), m_kind(kind), m_avatarUrl(std::move(avatarUrl)),
+              m_unread(unread), m_mentions(mentions) {}
+
+        // Discord: read channels are dimmed, unread ones white + semibold.
+        Brush NameBrush() const { return SolidBrush(m_unread || m_mentions ? 0xF2F3F5 : 0x949BA4); }
+        Windows::UI::Text::FontWeight NameWeight() const { return { static_cast<uint16_t>(m_unread || m_mentions ? 600 : 400) }; }
+        hstring MentionText() const { return m_mentions > 99 ? hstring{ L"99+" } : hstring{ std::to_wstring(m_mentions) }; }
+        Visibility MentionVisibility() const { return Show(m_mentions > 0); }
+        bool Unread() const { return m_unread; }
+        int Mentions() const { return m_mentions; }
+        ChannelKind Kind() const { return m_kind; }
+        std::wstring const& AvatarUrl() const { return m_avatarUrl; }
 
         hstring Id() const { return m_id; }
         hstring Name() const { return m_name; }
@@ -109,6 +140,8 @@ namespace winrt::DiscordWin3::implementation
         hstring m_id, m_name, m_glyph;
         ChannelKind m_kind;
         std::wstring m_avatarUrl;
+        bool m_unread;
+        int m_mentions;
     };
 
     struct MessageItem : MessageItemT<MessageItem>
@@ -127,6 +160,7 @@ namespace winrt::DiscordWin3::implementation
         Microsoft::UI::Xaml::Thickness RowPadding() const { return { 16, m_showHeader ? 12.0 : 1.0, 16, 1 }; }
         Brush RowBackground() const { return m_d.mentionsMe ? SolidBrush(0xF0B232, 0x18) : SolidBrush(0, 0); }
         Visibility ContentVisibility() const { return Show(m_d.HasBody()); }
+        Visibility ReactionsVisibility() const { return Show(!m_d.reactions.empty()); }
         Visibility DayVisibility() const { return Show(!m_day.empty()); }
         hstring DayText() const { return hstring{ m_day }; }
         hstring TagText() const { return hstring{ m_d.tag }; }

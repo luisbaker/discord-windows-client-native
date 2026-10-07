@@ -46,6 +46,12 @@
 #include <winrt/Microsoft.UI.Xaml.Documents.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <winrt/Microsoft.UI.Xaml.Hosting.h>
+#include <winrt/Microsoft.UI.Interop.h>
+#include <winrt/Microsoft.Windows.System.Power.h>
+#include <winrt/Windows.UI.ViewManagement.h>
+#include <winrt/Microsoft.Windows.AppNotifications.h>
+#include <winrt/Microsoft.Windows.AppNotifications.Builder.h>
+#include <winrt/Windows.ApplicationModel.DataTransfer.h>
 #include <winrt/Windows.Foundation.Numerics.h>
 
 #include <wil/cppwinrt_helpers.h>

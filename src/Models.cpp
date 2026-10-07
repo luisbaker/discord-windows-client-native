@@ -58,8 +58,8 @@ namespace winrt::DiscordWin3::implementation
         return it->second;
     }
 
-    GuildItem::GuildItem(hstring id, hstring name, hstring iconUrl)
-        : m_id(id), m_name(name), m_initials(id == L"@me" ? hstring{ L"\U0001F4AC" } : MakeInitials(name)), m_iconUrl(iconUrl)
+    GuildItem::GuildItem(hstring id, hstring name, hstring iconUrl, bool unread, int mentions)
+        : m_id(id), m_name(name), m_initials(id == L"@me" ? hstring{ L"\U0001F4AC" } : MakeInitials(name)), m_iconUrl(iconUrl), m_unread(unread), m_mentions(mentions)
     {
     }
 

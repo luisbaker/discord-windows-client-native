@@ -62,13 +62,25 @@
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:GuildItem">
                         <!-- Rounded clip is applied and animated in code (circle <-> squircle). -->
-                        <Grid Width="48" Height="48" ToolTipService.ToolTip="{x:Bind Name}"
-                              Background="{StaticResource ComposerBrush}">
-                            <TextBlock Text="{x:Bind Initials}" Visibility="{x:Bind InitialsVisibility}"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                                       FontSize="15" Foreground="{StaticResource HeaderTextBrush}" />
-                            <Image Source="{x:Bind Icon}" Visibility="{x:Bind IconVisibility}"
-                                   Width="48" Height="48" Stretch="UniformToFill" />
+                        <Grid Width="72" Height="48">
+                            <!-- Unread pill on the rail edge -->
+                            <Rectangle Visibility="{x:Bind UnreadVisibility}" Width="4" Height="8" RadiusX="2" RadiusY="2"
+                                       HorizontalAlignment="Left" Margin="-2,0,0,0" Fill="{StaticResource HeaderTextBrush}" />
+                            <Grid x:Name="IconHost" Width="48" Height="48" ToolTipService.ToolTip="{x:Bind Name}"
+                                  Background="{StaticResource ComposerBrush}">
+                                <TextBlock Text="{x:Bind Initials}" Visibility="{x:Bind InitialsVisibility}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           FontSize="15" Foreground="{StaticResource HeaderTextBrush}" />
+                                <Image Source="{x:Bind Icon}" Visibility="{x:Bind IconVisibility}"
+                                       Width="48" Height="48" Stretch="UniformToFill" />
+                            </Grid>
+                            <!-- Mention badge -->
+                            <Border Visibility="{x:Bind MentionVisibility}" MinWidth="18" Height="18" CornerRadius="9"
+                                    Padding="4,0" Background="#F23F43" BorderBrush="{StaticResource RailBrush}" BorderThickness="3"
+                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,-2">
+                                <TextBlock Text="{x:Bind MentionText}" FontSize="11" FontWeight="Bold" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                            </Border>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
@@ -116,9 +128,14 @@
                                             Background="{StaticResource ComposerBrush}" VerticalAlignment="Center">
                                         <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
                                     </Border>
-                                    <TextBlock Text="{x:Bind Name}" FontSize="15" TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center" Foreground="{StaticResource BodyTextBrush}" />
+                                    <TextBlock Text="{x:Bind Name}" FontSize="15" TextTrimming="CharacterEllipsis" MaxWidth="190"
+                                               VerticalAlignment="Center" Foreground="{x:Bind NameBrush}" FontWeight="{x:Bind NameWeight}" />
                                 </StackPanel>
+                                <Border Visibility="{x:Bind MentionVisibility}" MinWidth="16" Height="16" CornerRadius="8"
+                                        Padding="4,0" Background="#F23F43" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <TextBlock Text="{x:Bind MentionText}" FontSize="11" FontWeight="Bold" Foreground="White"
+                                               HorizontalAlignment="Center" Margin="0,-1,0,0" />
+                                </Border>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
@@ -265,6 +282,9 @@
                                         <TextBlock Text="{x:Bind Files}" Visibility="{x:Bind FilesVisibility}"
                                                    TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="14"
                                                    Foreground="{StaticResource LinkBrush}" />
+                                        <!-- Filled in code: one chip per reaction -->
+                                        <StackPanel x:Name="Reactions" Visibility="{x:Bind ReactionsVisibility}"
+                                                    Orientation="Horizontal" Spacing="4" Margin="0,4,0,0" />
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
@@ -279,11 +299,25 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="AttachButton" Margin="8,0,0,0" VerticalAlignment="Center" Click="OnAttach" IsEnabled="False"
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <!-- "Réponse à X" / "Modification" bar -->
+                    <Grid x:Name="ReplyBar" Grid.ColumnSpan="2" Visibility="Collapsed" Padding="16,6,8,6"
+                          Background="#1D1E22" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+                        <TextBlock x:Name="ReplyText" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   Foreground="{StaticResource MutedTextBrush}" Margin="0,0,40,0" />
+                        <Button HorizontalAlignment="Right" Click="OnCancelReply" Padding="6,2" Background="Transparent"
+                                BorderThickness="0" ToolTipService.ToolTip="Annuler (Échap)">
+                            <FontIcon Glyph="&#xE711;" FontSize="12" />
+                        </Button>
+                    </Grid>
+                    <Button x:Name="AttachButton" Grid.Row="1" Margin="8,0,0,0" VerticalAlignment="Center" Click="OnAttach" IsEnabled="False"
                             Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="Envoyer un fichier">
                         <FontIcon Glyph="&#xE710;" FontSize="16" />
                     </Button>
-                    <TextBox x:Name="Composer" Grid.Column="1" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200"
+                    <TextBox x:Name="Composer" Grid.Row="1" Grid.Column="1" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200"
                              BorderThickness="0" Background="Transparent" Padding="8,11,16,11" FontSize="15"
                              PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerTextChanged" IsEnabled="False" />
                 </Grid>
