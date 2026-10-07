@@ -26,6 +26,11 @@ namespace DiscordWin3
         Boolean IsVoiceUser { get; };
         Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
         Microsoft.UI.Xaml.Visibility AvatarVisibility { get; };
+        Double AvatarSize { get; };
+        Microsoft.UI.Xaml.Media.Brush StatusBrush { get; };
+        Microsoft.UI.Xaml.Visibility StatusVisibility { get; };
+        String Subtitle { get; };
+        Microsoft.UI.Xaml.Visibility SubtitleVisibility { get; };
         Microsoft.UI.Xaml.Visibility GlyphVisibility { get; };
         Microsoft.UI.Xaml.Thickness ItemMargin { get; };
         Double TextOpacity { get; };
@@ -71,6 +76,20 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Visibility EmbedTitleVisibility { get; };
         String EmbedDescription { get; };
         Microsoft.UI.Xaml.Visibility EmbedDescriptionVisibility { get; };
+    }
+
+    runtimeclass FriendItem
+    {
+        String Id { get; };
+        String Name { get; };
+        String Tag { get; };
+        Microsoft.UI.Xaml.Visibility TagVisibility { get; };
+        String Subtitle { get; };
+        Microsoft.UI.Xaml.Media.ImageSource Avatar { get; };
+        Microsoft.UI.Xaml.Media.Brush StatusBrush { get; };
+        Microsoft.UI.Xaml.Visibility MessageVisibility { get; };
+        Microsoft.UI.Xaml.Visibility AcceptVisibility { get; };
+        String RemoveLabel { get; };
     }
 
     runtimeclass MemberItem

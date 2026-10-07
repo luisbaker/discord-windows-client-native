@@ -253,6 +253,26 @@ namespace winrt::DiscordWin3::implementation
         ChannelList().ItemsSource(m_channelItems);
         MessageList().ItemsSource(m_messageItems);
         MemberList().ItemsSource(m_memberItems);
+        FriendsList().ItemsSource(m_friendItems);
+
+        // Keyboard: Ctrl+K quick switcher, Alt+Left / Alt+Right history.
+        auto accelerator = [this](Windows::System::VirtualKey key, Windows::System::VirtualKeyModifiers modifiers, auto handler)
+        {
+            Input::KeyboardAccelerator a;
+            a.Key(key);
+            a.Modifiers(modifiers);
+            a.Invoked([weak = get_weak(), handler](auto&&, Input::KeyboardAcceleratorInvokedEventArgs const& e)
+            {
+                if (auto self = weak.get()) { e.Handled(true); handler(self.get()); }
+            });
+            Content().as<UIElement>().KeyboardAccelerators().Append(a);
+        };
+        using Windows::System::VirtualKey;
+        using Windows::System::VirtualKeyModifiers;
+        accelerator(VirtualKey::K, VirtualKeyModifiers::Control, [](MainWindow* w) { w->OnQuickSwitch(nullptr, nullptr); });
+        accelerator(VirtualKey::Left, VirtualKeyModifiers::Menu, [](MainWindow* w) { w->OnNavigateBack(nullptr, nullptr); });
+        accelerator(VirtualKey::Right, VirtualKeyModifiers::Menu, [](MainWindow* w) { w->OnNavigateForward(nullptr, nullptr); });
+        NavButtons().SizeChanged([weak = get_weak()](auto&&, auto&&) { if (auto self = weak.get()) self->UpdateTitleBarRegions(); });
 
         m_typingTimer = m_dispatcher.CreateTimer();
         m_typingTimer.Interval(std::chrono::seconds(1));
@@ -741,6 +761,13 @@ namespace winrt::DiscordWin3::implementation
         m_memberItems.Clear();
         m_memberListGuild.clear();
         m_collapsed.clear();
+        m_presence.clear();
+        m_relationships.clear();
+        m_userTags.clear();
+        m_friendItems.Clear();
+        m_history.clear();
+        m_historyIndex = 0;
+        m_showingFriends = false;
         m_typing.clear();
         m_typingTimer.Stop();
         TypingText().Text(L"");
@@ -793,6 +820,14 @@ namespace winrt::DiscordWin3::implementation
                 AppendMessage(*data);
             }
             OnMessageForUnread(d, data ? &*data : nullptr);
+        }
+        else if (type == L"PRESENCE_UPDATE")
+        {
+            OnPresenceUpdate(d);
+        }
+        else if (type.starts_with(L"RELATIONSHIP_"))
+        {
+            OnRelationshipEvent(type, d);
         }
         else if (type == L"MESSAGE_ACK")
         {
@@ -917,6 +952,10 @@ namespace winrt::DiscordWin3::implementation
         auto& info = m_users[Json::Str(user, L"id")];
         info.name = UserDisplayName(user);
         info.avatarUrl = AvatarUrl(user);
+        auto tagged = Json::Obj(user, L"primary_guild");
+        if (!tagged) tagged = Json::Obj(user, L"clan");
+        if (tagged && Json::Bool(tagged, L"identity_enabled", true) && !Json::Str(tagged, L"tag").empty())
+            m_userTags[Json::Str(user, L"id")] = Json::Str(tagged, L"tag");
         return info;
     }
 
@@ -1011,6 +1050,10 @@ namespace winrt::DiscordWin3::implementation
         else
         {
             info.avatarUrl = firstAvatar;
+            if (auto recipients = Json::Arr(c, L"recipients"); recipients && recipients.Size() > 0 && recipients.GetAt(0).ValueType() == JsonValueType::Object)
+                info.recipientId = Json::Str(recipients.GetAt(0).GetObject(), L"id");
+            else if (auto ids = Json::Arr(c, L"recipient_ids"); ids && ids.Size() > 0 && ids.GetAt(0).ValueType() == JsonValueType::String)
+                info.recipientId = ids.GetAt(0).GetString();
         }
     }
 
@@ -1223,6 +1266,7 @@ namespace winrt::DiscordWin3::implementation
             }
         }
 
+        ParseRelationships(d);
         ParseReadStates(d);
         ParseGuildSettings(Json::Get(d, L"user_guild_settings"));
         RefreshGuildRail();
@@ -1301,8 +1345,10 @@ namespace winrt::DiscordWin3::implementation
             });
             for (auto c : dms)
             {
-                items.push_back(make<ChannelItem>(hstring{ c->id }, hstring{ c->name }, hstring{ Glyph(c->type) },
-                                                  ChannelKind::Text, c->avatarUrl, IsUnread(*c), MentionsIn(c->id)));
+                auto item = make_self<ChannelItem>(hstring{ c->id }, hstring{ c->name }, hstring{ Glyph(c->type) },
+                                                   ChannelKind::Text, c->avatarUrl, IsUnread(*c), MentionsIn(c->id));
+                if (!c->recipientId.empty()) item->SetPresence(PresenceColor(c->recipientId), PresenceText(c->recipientId, false));
+                items.push_back(item.as<IInspectable>());
             }
         }
         else if (auto guild = FindGuild(m_currentGuildId))
@@ -1414,8 +1460,17 @@ namespace winrt::DiscordWin3::implementation
         m_memberItems.Clear();
         m_memberListGuild.clear();
         MembersPane().Visibility(Show(MembersToggle().IsChecked().Value() && m_currentGuildId != HomeId));
+        UpdateHomeChrome();
         RefreshChannelList();
         UpdateTitle();
+
+        // Home opens on the friends page, like the official client.
+        if (m_currentGuildId == HomeId)
+        {
+            ShowFriends(true);
+            return;
+        }
+        ShowFriends(false);
 
         // Auto-open the first text channel, like the official client.
         for (uint32_t i = 0; i < m_channelItems.Size(); ++i)
@@ -1461,6 +1516,7 @@ namespace winrt::DiscordWin3::implementation
         ChannelGlyph().Visibility(Show(!hasAvatar));
         ChannelAvatarBorder().Visibility(Show(hasAvatar));
         ChannelAvatar().Source(hasAvatar ? item.Avatar() : nullptr);
+        ShowFriends(false);
         LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Name() });
         Composer().PlaceholderText(L"Envoyer un message " + std::wstring{ m_currentGuildId == HomeId ? L"à @" : L"dans #" }
                                    + std::wstring{ item.Name() });
@@ -1620,6 +1676,7 @@ namespace winrt::DiscordWin3::implementation
         auto generation = ++m_channelGeneration;
         auto rest = m_rest;
         m_currentChannelId = id;
+        PushHistory();
         m_hasMoreOlder = false;
         m_loadingOlder = false;
         ChannelTitle().Text(title);
@@ -2795,8 +2852,10 @@ namespace winrt::DiscordWin3::implementation
             if (existing->Id() != channelId) continue;
 
             bool selected = ChannelList().SelectedIndex() == static_cast<int>(i);
-            m_channelItems.SetAt(i, make<ChannelItem>(existing->Id(), existing->Name(), existing->Glyph(), existing->Kind(),
-                                                      existing->AvatarUrl(), IsUnread(*channel), MentionsIn(channelId)));
+            auto item = make_self<ChannelItem>(existing->Id(), existing->Name(), existing->Glyph(), existing->Kind(),
+                                               existing->AvatarUrl(), IsUnread(*channel), MentionsIn(channelId));
+            if (!channel->recipientId.empty()) item->SetPresence(PresenceColor(channel->recipientId), PresenceText(channel->recipientId, false));
+            m_channelItems.SetAt(i, item.as<IInspectable>());
             if (selected) ChannelList().SelectedIndex(static_cast<int>(i));
             return;
         }
@@ -3297,5 +3356,520 @@ namespace winrt::DiscordWin3::implementation
                 break;
             }
         }
+    }
+
+    // ------------------------------------------------------------------ home: presence & relationships
+
+    void MainWindow::ParsePresence(JsonObject const& p, std::wstring userId)
+    {
+        if (userId.empty())
+        {
+            auto user = Json::Obj(p, L"user");
+            userId = user ? Json::Str(user, L"id") : Json::Str(p, L"user_id");
+        }
+        if (userId.empty()) return;
+
+        Presence presence;
+        presence.status = Json::Str(p, L"status");
+        auto activities = Json::Arr(p, L"activities");
+        presence.activity = ActivityText(activities);
+        if (activities)
+        {
+            for (auto const& a : activities)
+            {
+                if (a.ValueType() != JsonValueType::Object) continue;
+                auto type = static_cast<int>(Json::Num(a.GetObject(), L"type", -1));
+                if (type >= 0 && type <= 3)
+                {
+                    presence.hasActivity = true;
+                    if (presence.game.empty())
+                    {
+                        JsonArray only;
+                        only.Append(a);
+                        presence.game = ActivityText(only);
+                    }
+                }
+            }
+        }
+        m_presence[userId] = std::move(presence);
+    }
+
+    void MainWindow::ParseRelationships(JsonObject const& d)
+    {
+        m_relationships.clear();
+        if (auto list = Json::Arr(d, L"relationships"))
+        {
+            for (auto const& r : list)
+            {
+                if (r.ValueType() != JsonValueType::Object) continue;
+                auto o = r.GetObject();
+                if (auto user = Json::Obj(o, L"user")) CacheUser(user);
+                m_relationships[Json::Str(o, L"id")] = { static_cast<int>(Json::Num(o, L"type")), Json::Str(o, L"nickname") };
+            }
+        }
+
+        // Friends' presences: plain "presences" or "merged_presences.friends" depending on capabilities.
+        auto presences = Json::Arr(d, L"presences");
+        if (!presences) presences = Json::Arr(Json::Obj(d, L"merged_presences"), L"friends");
+        if (presences)
+        {
+            for (auto const& p : presences)
+            {
+                if (p.ValueType() == JsonValueType::Object) ParsePresence(p.GetObject());
+            }
+        }
+    }
+
+    void MainWindow::OnPresenceUpdate(JsonObject const& d)
+    {
+        auto user = Json::Obj(d, L"user");
+        auto userId = Json::Str(user, L"id");
+        bool friendOrDm = m_relationships.contains(userId);
+        ChannelInfo* dm = nullptr;
+        for (auto& c : m_dms)
+        {
+            if (c.recipientId == userId) { dm = &c; friendOrDm = true; }
+        }
+        if (!friendOrDm) return;   // guild-wide presences are not tracked (RAM)
+
+        if (Json::Str(user, L"username").size()) CacheUser(user);
+        ParsePresence(d, userId);
+
+        if (dm && m_currentGuildId == HomeId) UpdateChannelRow(dm->id);
+        if (m_showingFriends)
+        {
+            RefreshFriends();
+            RefreshActiveNow();
+        }
+    }
+
+    void MainWindow::OnRelationshipEvent(std::wstring const& type, JsonObject const& d)
+    {
+        auto id = Json::Str(d, L"id");
+        if (type == L"RELATIONSHIP_REMOVE")
+        {
+            m_relationships.erase(id);
+        }
+        else
+        {
+            if (auto user = Json::Obj(d, L"user")) CacheUser(user);
+            auto& r = m_relationships[id];
+            if (Json::Get(d, L"type")) r.type = static_cast<int>(Json::Num(d, L"type"));
+            r.nickname = Json::Str(d, L"nickname");
+        }
+        if (m_showingFriends) RefreshFriends();
+    }
+
+    uint32_t MainWindow::PresenceColor(std::wstring const& userId) const
+    {
+        auto it = m_presence.find(userId);
+        return StatusColor(it == m_presence.end() || it->second.status.empty() ? std::wstring{ L"offline" } : it->second.status);
+    }
+
+    std::wstring MainWindow::PresenceText(std::wstring const& userId, bool fallbackToStatus) const
+    {
+        auto it = m_presence.find(userId);
+        if (it != m_presence.end() && !it->second.activity.empty()) return it->second.activity;
+        if (!fallbackToStatus) return {};
+        auto status = it == m_presence.end() ? std::wstring{} : it->second.status;
+        if (status == L"online") return L"En ligne";
+        if (status == L"idle") return L"Inactif";
+        if (status == L"dnd") return L"Ne pas déranger";
+        return L"Hors ligne";
+    }
+
+    // ------------------------------------------------------------------ home: friends page
+
+    void MainWindow::UpdateHomeChrome()
+    {
+        bool home = m_currentGuildId == HomeId;
+        GuildHeader().Visibility(Show(!home));
+        QuickSwitchButton().Visibility(Show(home));
+        HomeNav().Visibility(Show(home));
+    }
+
+    void MainWindow::ShowFriends(bool show)
+    {
+        m_showingFriends = show;
+        FriendsView().Visibility(Show(show));
+        FriendsNavButton().Background(show ? SolidBrush(0x2C2C31) : SolidBrush(0, 0));
+        if (!show) return;
+
+        // Leaving the conversation frees its rows (and their images).
+        ++m_channelGeneration;
+        m_currentChannelId.clear();
+        m_messageItems.Clear();
+        m_typing.clear();
+        UpdateTypingText();
+        ClearComposerMode();
+        ChannelList().SelectedIndex(-1);
+        TitleText().Text(L"Amis");
+        TitleIcon().Source(nullptr);
+        MembersPane().Visibility(Visibility::Visible);
+        RefreshFriends();
+        RefreshActiveNow();
+    }
+
+    void MainWindow::RefreshFriends()
+    {
+        auto lower = [](std::wstring s)
+        {
+            if (!s.empty()) CharLowerBuffW(s.data(), static_cast<DWORD>(s.size()));
+            return s;
+        };
+        auto filter = lower(std::wstring{ FriendsSearch().Text() });
+        bool adding = m_friendsTab == L"add";
+
+        int pending = 0;
+        for (auto const& [id, r] : m_relationships) if (r.type == 3 || r.type == 4) ++pending;
+        TabPending().Visibility(Show(pending > 0));
+        if (m_friendsTab == L"pending" && pending == 0) m_friendsTab = L"online";
+
+        for (auto [tab, button] : { std::pair{ L"online", TabOnline() }, std::pair{ L"all", TabAll() }, std::pair{ L"pending", TabPending() } })
+        {
+            button.Background(m_friendsTab == tab ? SolidBrush(0x2C2C31) : SolidBrush(0, 0));
+        }
+        AddFriendPanel().Visibility(Show(adding));
+        FriendsSearch().Visibility(Show(!adding));
+        FriendsList().Visibility(Show(!adding));
+        FriendsCount().Visibility(Show(!adding));
+        if (adding) return;
+
+        struct Row { std::wstring name; IInspectable item; };
+        std::vector<Row> rows;
+        for (auto const& [id, r] : m_relationships)
+        {
+            bool isFriend = r.type == 1;
+            bool isPending = r.type == 3 || r.type == 4;
+            auto presence = m_presence.find(id);
+            auto status = presence == m_presence.end() ? std::wstring{} : presence->second.status;
+            bool online = status == L"online" || status == L"idle" || status == L"dnd";
+
+            if (m_friendsTab == L"online" && !(isFriend && online)) continue;
+            if (m_friendsTab == L"all" && !isFriend) continue;
+            if (m_friendsTab == L"pending" && !isPending) continue;
+
+            auto user = m_users.find(id);
+            std::wstring name = !r.nickname.empty() ? r.nickname : user != m_users.end() ? user->second.name : id;
+            if (!filter.empty() && lower(name).find(filter) == std::wstring::npos) continue;
+
+            std::wstring subtitle = isPending ? (r.type == 3 ? L"Demande d'ami reçue" : L"Demande d'ami envoyée")
+                                              : PresenceText(id, true);
+            auto tag = m_userTags.find(id);
+            rows.push_back({ lower(name), make<FriendItem>(id, name, tag != m_userTags.end() ? tag->second : L"", subtitle,
+                                                           user != m_users.end() ? user->second.avatarUrl : DefaultAvatar(id, L"0"),
+                                                           PresenceColor(id), r.type) });
+        }
+        std::sort(rows.begin(), rows.end(), [](Row const& a, Row const& b) { return a.name < b.name; });
+
+        std::vector<IInspectable> items;
+        items.reserve(rows.size());
+        for (auto& r : rows) items.push_back(std::move(r.item));
+        m_friendItems.ReplaceAll(items);
+
+        std::wstring label = m_friendsTab == L"online" ? L"En ligne" : m_friendsTab == L"all" ? L"Tous les amis" : L"En attente";
+        FriendsCount().Text(label + L" — " + std::to_wstring(items.size()));
+    }
+
+    void MainWindow::RefreshActiveNow()
+    {
+        // Right column on the friends page: friends currently playing / listening / watching.
+        std::vector<IInspectable> items;
+        items.push_back(make<MemberItem>(std::wstring{ L"Actifs maintenant" }));
+        for (auto const& [id, r] : m_relationships)
+        {
+            if (r.type != 1) continue;
+            auto presence = m_presence.find(id);
+            if (presence == m_presence.end() || !presence->second.hasActivity) continue;
+            auto user = m_users.find(id);
+            items.push_back(make<MemberItem>(user != m_users.end() ? user->second.name : id, 0u,
+                                             user != m_users.end() ? user->second.avatarUrl : DefaultAvatar(id, L"0"),
+                                             presence->second.status, presence->second.game));
+            if (items.size() > 40) break;
+        }
+        if (items.size() == 1)
+        {
+            items.push_back(make<MemberItem>(std::wstring{ L"C'est calme pour le moment…" }));
+        }
+        m_memberListGuild.clear();
+        m_memberItems.ReplaceAll(items);
+    }
+
+    void MainWindow::OnShowFriends(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_currentGuildId != HomeId)
+        {
+            GuildList().SelectedIndex(0);   // Home is always the first rail item
+        }
+        ShowFriends(true);
+    }
+
+    void MainWindow::OnFriendsTab(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        m_friendsTab = unbox_value<hstring>(sender.as<Button>().Tag());
+        RefreshFriends();
+        if (m_friendsTab == L"add") AddFriendBox().Focus(FocusState::Programmatic);
+    }
+
+    void MainWindow::OnFriendsSearchChanged(IInspectable const&, TextChangedEventArgs const&)
+    {
+        if (m_showingFriends) RefreshFriends();
+    }
+
+    fire_and_forget MainWindow::OnSendFriendRequest(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto strong = get_strong();
+        std::wstring username{ AddFriendBox().Text() };
+        while (!username.empty() && username.back() == L' ') username.pop_back();
+        if (username.empty() || !m_rest) co_return;
+
+        JsonObject body;
+        body.Insert(L"username", JsonValue::CreateStringValue(username));
+        body.Insert(L"discriminator", JsonValue::CreateNullValue());
+        hstring error;
+        try
+        {
+            co_await m_rest->PostJson(L"/users/@me/relationships", body);
+        }
+        catch (hresult_error const& e)
+        {
+            error = e.message();
+        }
+        co_await wil::resume_foreground(m_dispatcher);
+        std::wstring message{ error };
+        if (message.empty())
+        {
+            AddFriendResult().Foreground(SolidBrush(0x23A55A));
+            AddFriendResult().Text(L"Ta demande d'ami a été envoyée à " + username + L".");
+            AddFriendBox().Text(L"");
+        }
+        else
+        {
+            AddFriendResult().Foreground(SolidBrush(0xF23F43));
+            AddFriendResult().Text(message.find(L"captcha") != std::wstring::npos
+                ? L"Discord demande une vérification (captcha) : envoie cette demande depuis l'appli officielle."
+                : L"Hum, ça n'a pas marché. Vérifie le nom d'utilisateur.");
+        }
+    }
+
+    void MainWindow::OnFriendMessage(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        OpenDmWith(std::wstring{ unbox_value<hstring>(sender.as<Button>().Tag()) });
+    }
+
+    fire_and_forget MainWindow::OnFriendAccept(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto strong = get_strong();
+        auto id = std::wstring{ unbox_value<hstring>(sender.as<Button>().Tag()) };
+        if (!m_rest) co_return;
+        try
+        {
+            co_await m_rest->Call(Windows::Web::Http::HttpMethod::Put(), L"/users/@me/relationships/" + id, JsonObject{});
+        }
+        catch (...)
+        {
+        }
+    }
+
+    fire_and_forget MainWindow::OnFriendRemove(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto strong = get_strong();
+        auto id = std::wstring{ unbox_value<hstring>(sender.as<Button>().Tag()) };
+        if (!m_rest) co_return;
+
+        if (auto it = m_relationships.find(id); it != m_relationships.end() && it->second.type == 1)
+        {
+            auto user = m_users.find(id);
+            ContentDialog dialog;
+            dialog.XamlRoot(Content().XamlRoot());
+            dialog.Title(box_value(L"Retirer « " + (user != m_users.end() ? user->second.name : id) + L" »"));
+            dialog.Content(box_value(L"Tu es sûr de vouloir retirer cette personne de tes amis ?"));
+            dialog.PrimaryButtonText(L"Retirer l'ami");
+            dialog.CloseButtonText(L"Annuler");
+            dialog.DefaultButton(ContentDialogButton::Close);
+            if (co_await dialog.ShowAsync() != ContentDialogResult::Primary) co_return;
+        }
+        try
+        {
+            co_await m_rest->Call(Windows::Web::Http::HttpMethod::Delete(), L"/users/@me/relationships/" + id);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    fire_and_forget MainWindow::OpenDmWith(std::wstring userId)
+    {
+        auto strong = get_strong();
+        for (auto const& dm : m_dms)
+        {
+            if (dm.recipientId == userId)
+            {
+                OpenChannel(HomeId, dm.id);
+                co_return;
+            }
+        }
+        if (!m_rest) co_return;
+
+        JsonArray recipients;
+        recipients.Append(JsonValue::CreateStringValue(userId));
+        JsonObject body;
+        body.Insert(L"recipients", recipients);
+        IJsonValue result{ nullptr };
+        try
+        {
+            result = co_await m_rest->PostJson(L"/users/@me/channels", body);
+        }
+        catch (...)
+        {
+        }
+        co_await wil::resume_foreground(m_dispatcher);
+        if (!result || result.ValueType() != JsonValueType::Object) co_return;
+
+        auto o = result.GetObject();
+        auto info = ParseChannel(o);
+        ParseDmChannel(o, info);
+        m_channelNames[info.id] = info.name;
+        auto id = info.id;
+        if (!FindChannel(id)) m_dms.push_back(std::move(info));
+        if (m_currentGuildId == HomeId) RefreshChannelList();
+        OpenChannel(HomeId, id);
+    }
+
+    // ------------------------------------------------------------------ quick switcher (Ctrl+K)
+
+    fire_and_forget MainWindow::OnQuickSwitch(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto strong = get_strong();
+        struct Target { std::wstring label, lower, guild, channel; };
+        auto targets = std::make_shared<std::vector<Target>>();
+        auto lower = [](std::wstring s)
+        {
+            if (!s.empty()) CharLowerBuffW(s.data(), static_cast<DWORD>(s.size()));
+            return s;
+        };
+        for (auto const& dm : m_dms)
+        {
+            targets->push_back({ L"@ " + dm.name, lower(dm.name), HomeId, dm.id });
+        }
+        for (auto const& g : m_guilds)
+        {
+            for (auto const& c : g.channels)
+            {
+                if (!IsTextLike(c.type) || !g.perms.CanView(c.overwrites)) continue;
+                targets->push_back({ L"# " + c.name + L"   —   " + g.name, lower(c.name + L" " + g.name), g.id, c.id });
+            }
+        }
+
+        AutoSuggestBox box;
+        box.PlaceholderText(L"Où veux-tu aller ?");
+        box.Width(460);
+        auto matches = std::make_shared<std::vector<Target const*>>();
+
+        ContentDialog dialog;
+        dialog.XamlRoot(Content().XamlRoot());
+        dialog.Title(box_value(L"Rechercher ou lancer une conversation"));
+        dialog.Content(box);
+        dialog.CloseButtonText(L"Fermer");
+
+        box.TextChanged([targets, matches, lower](AutoSuggestBox const& sender, AutoSuggestBoxTextChangedEventArgs const& args)
+        {
+            if (args.Reason() != AutoSuggestionBoxTextChangeReason::UserInput) return;
+            auto query = lower(std::wstring{ sender.Text() });
+            matches->clear();
+            std::vector<IInspectable> labels;
+            for (auto const& t : *targets)
+            {
+                if (query.empty() || t.lower.find(query) == std::wstring::npos) continue;
+                matches->push_back(&t);
+                labels.push_back(box_value(t.label));
+                if (labels.size() >= 12) break;
+            }
+            sender.ItemsSource(single_threaded_vector(std::move(labels)));
+        });
+
+        auto choose = [weak = get_weak(), matches, dialog](std::wstring const& label)
+        {
+            auto self = weak.get();
+            if (!self) return;
+            for (auto t : *matches)
+            {
+                if (t->label == label || label.empty())
+                {
+                    dialog.Hide();
+                    self->OpenChannel(t->guild, t->channel);
+                    return;
+                }
+            }
+        };
+        box.SuggestionChosen([choose](AutoSuggestBox const&, AutoSuggestBoxSuggestionChosenEventArgs const& args)
+        {
+            choose(std::wstring{ unbox_value<hstring>(args.SelectedItem()) });
+        });
+        box.QuerySubmitted([choose](AutoSuggestBox const&, AutoSuggestBoxQuerySubmittedEventArgs const& args)
+        {
+            choose(args.ChosenSuggestion() ? std::wstring{ unbox_value<hstring>(args.ChosenSuggestion()) } : std::wstring{});
+        });
+        box.Loaded([](IInspectable const& sender, RoutedEventArgs const&)
+        {
+            sender.as<AutoSuggestBox>().Focus(FocusState::Programmatic);
+        });
+
+        co_await dialog.ShowAsync();
+    }
+
+    // ------------------------------------------------------------------ back / forward history
+
+    void MainWindow::PushHistory()
+    {
+        if (m_navigatingHistory || m_currentChannelId.empty()) return;
+        std::pair<std::wstring, std::wstring> entry{ m_currentGuildId, m_currentChannelId };
+        if (!m_history.empty() && m_history[m_historyIndex] == entry) return;
+
+        if (!m_history.empty()) m_history.resize(m_historyIndex + 1);
+        m_history.push_back(entry);
+        if (m_history.size() > 50) m_history.erase(m_history.begin());
+        m_historyIndex = m_history.size() - 1;
+        UpdateNavButtons();
+    }
+
+    void MainWindow::UpdateNavButtons()
+    {
+        BackButton().IsEnabled(m_historyIndex > 0 && !m_history.empty());
+        ForwardButton().IsEnabled(m_historyIndex + 1 < m_history.size());
+    }
+
+    void MainWindow::OnNavigateBack(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_historyIndex == 0 || m_history.empty()) return;
+        --m_historyIndex;
+        m_navigatingHistory = true;
+        OpenChannel(m_history[m_historyIndex].first, m_history[m_historyIndex].second);
+        m_navigatingHistory = false;
+        UpdateNavButtons();
+    }
+
+    void MainWindow::OnNavigateForward(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_historyIndex + 1 >= m_history.size()) return;
+        ++m_historyIndex;
+        m_navigatingHistory = true;
+        OpenChannel(m_history[m_historyIndex].first, m_history[m_historyIndex].second);
+        m_navigatingHistory = false;
+        UpdateNavButtons();
+    }
+
+    void MainWindow::UpdateTitleBarRegions()
+    {
+        // The custom title bar is a drag area: let clicks through on the Back / Forward buttons.
+        auto root = Content().try_as<FrameworkElement>();
+        if (!root || !root.XamlRoot()) return;
+        double scale = root.XamlRoot().RasterizationScale();
+        auto bounds = NavButtons().TransformToVisual(nullptr).TransformBounds({ 0, 0,
+            static_cast<float>(NavButtons().ActualWidth()), static_cast<float>(NavButtons().ActualHeight()) });
+        Windows::Graphics::RectInt32 rect{ static_cast<int32_t>(bounds.X * scale), static_cast<int32_t>(bounds.Y * scale),
+                                           static_cast<int32_t>(bounds.Width * scale), static_cast<int32_t>(bounds.Height * scale) };
+        auto source = Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(AppWindow().Id());
+        source.SetRegionRects(Microsoft::UI::Input::NonClientRegionKind::Passthrough, { rect });
     }
 }

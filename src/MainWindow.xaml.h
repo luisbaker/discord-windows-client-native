@@ -15,6 +15,7 @@ namespace winrt::DiscordWin3::implementation
         std::wstring name;
         std::wstring parentId;
         std::wstring avatarUrl;      // DMs: recipient avatar / group icon
+        std::wstring recipientId;    // 1:1 DMs: the other user (presence dot)
         int type = 0;
         int position = 0;
         std::wstring lastMessageId;
@@ -73,6 +74,16 @@ namespace winrt::DiscordWin3::implementation
         void OnTokenLogin(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnQrRetry(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnCancelReply(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnNavigateBack(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnNavigateForward(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        fire_and_forget OnQuickSwitch(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnShowFriends(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnFriendsTab(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnFriendsSearchChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::TextChangedEventArgs const&);
+        fire_and_forget OnSendFriendRequest(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnFriendMessage(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        fire_and_forget OnFriendAccept(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        fire_and_forget OnFriendRemove(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
     private:
         // Session
@@ -165,6 +176,22 @@ namespace winrt::DiscordWin3::implementation
         fire_and_forget DeleteMessage(std::wstring messageId);
         bool EditLastOwnMessage();
 
+        // Home: friends, presence, quick switcher, history
+        void ParseRelationships(Windows::Data::Json::JsonObject const& d);
+        void ParsePresence(Windows::Data::Json::JsonObject const& p, std::wstring userId = {});
+        void OnPresenceUpdate(Windows::Data::Json::JsonObject const& d);
+        void OnRelationshipEvent(std::wstring const& type, Windows::Data::Json::JsonObject const& d);
+        uint32_t PresenceColor(std::wstring const& userId) const;
+        std::wstring PresenceText(std::wstring const& userId, bool fallbackToStatus) const;
+        void ShowFriends(bool show);
+        void RefreshFriends();
+        void RefreshActiveNow();
+        void UpdateHomeChrome();
+        fire_and_forget OpenDmWith(std::wstring userId);
+        void PushHistory();
+        void UpdateNavButtons();
+        void UpdateTitleBarRegions();
+
         // Notifications
         void InitNotifications();
         void Notify(::DiscordWin3::MessageData const& data, std::wstring const& channelId, std::wstring const& guildId);
@@ -213,6 +240,19 @@ namespace winrt::DiscordWin3::implementation
         bool m_notificationsReady = false;
         std::wstring m_pendingOpenGuild, m_pendingOpenChannel;
         Microsoft::UI::Xaml::Controls::MenuFlyout m_messageMenu{ nullptr };
+
+        struct Presence { std::wstring status; std::wstring activity; std::wstring game; bool hasActivity = false; };
+        std::unordered_map<std::wstring, Presence> m_presence;            // userId -> presence (friends + DMs)
+        struct Relationship { int type = 0; std::wstring nickname; };
+        std::unordered_map<std::wstring, Relationship> m_relationships;   // userId -> relationship
+        std::unordered_map<std::wstring, std::wstring> m_userTags;        // userId -> server tag
+        std::wstring m_friendsTab = L"online";
+        bool m_showingFriends = false;
+        Windows::Foundation::Collections::IObservableVector<IInspectable> m_friendItems =
+            single_threaded_observable_vector<IInspectable>();
+        std::vector<std::pair<std::wstring, std::wstring>> m_history;      // (guild, channel)
+        size_t m_historyIndex = 0;
+        bool m_navigatingHistory = false;
         std::wstring m_ackChannel, m_ackMessage;
         bool m_ackScheduled = false;
 

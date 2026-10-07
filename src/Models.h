@@ -4,6 +4,7 @@
 #include "ChannelItem.g.h"
 #include "MessageItem.g.h"
 #include "MemberItem.g.h"
+#include "FriendItem.g.h"
 
 namespace DiscordWin3
 {
@@ -122,6 +123,16 @@ namespace winrt::DiscordWin3::implementation
         ChannelKind Kind() const { return m_kind; }
         std::wstring const& AvatarUrl() const { return m_avatarUrl; }
 
+        // DMs only: presence dot + activity line (set once, before the item is shown).
+        void SetPresence(uint32_t statusColor, std::wstring subtitle) { m_statusColor = statusColor; m_subtitle = std::move(subtitle); }
+        uint32_t StatusColor() const { return m_statusColor; }
+        std::wstring const& SubtitleText() const { return m_subtitle; }
+        double AvatarSize() const { return IsVoiceUser() ? 24.0 : 32.0; }
+        Brush StatusBrush() const { return SolidBrush(m_statusColor ? m_statusColor : 0x80848E); }
+        Visibility StatusVisibility() const { return Show(m_statusColor != 0); }
+        hstring Subtitle() const { return hstring{ m_subtitle }; }
+        Visibility SubtitleVisibility() const { return Show(!m_subtitle.empty()); }
+
         hstring Id() const { return m_id; }
         hstring Name() const { return m_name; }
         hstring Glyph() const { return m_glyph; }
@@ -142,6 +153,36 @@ namespace winrt::DiscordWin3::implementation
         std::wstring m_avatarUrl;
         bool m_unread;
         int m_mentions;
+        uint32_t m_statusColor = 0;
+        std::wstring m_subtitle;
+    };
+
+    struct FriendItem : FriendItemT<FriendItem>
+    {
+        // relationship: 1 friend, 3 incoming request, 4 outgoing request
+        FriendItem(std::wstring id, std::wstring name, std::wstring tag, std::wstring subtitle,
+                   std::wstring avatarUrl, uint32_t statusColor, int relationship)
+            : m_id(std::move(id)), m_name(std::move(name)), m_tag(std::move(tag)), m_subtitle(std::move(subtitle)),
+              m_avatarUrl(std::move(avatarUrl)), m_statusColor(statusColor), m_relationship(relationship) {}
+
+        hstring Id() const { return hstring{ m_id }; }
+        hstring Name() const { return hstring{ m_name }; }
+        hstring Tag() const { return hstring{ m_tag }; }
+        Visibility TagVisibility() const { return Show(!m_tag.empty()); }
+        hstring Subtitle() const { return hstring{ m_subtitle }; }
+        ImageSource Avatar();
+        Brush StatusBrush() const { return SolidBrush(m_statusColor); }
+        Visibility MessageVisibility() const { return Show(m_relationship == 1); }
+        Visibility AcceptVisibility() const { return Show(m_relationship == 3); }
+        hstring RemoveLabel() const
+        {
+            return m_relationship == 1 ? L"Retirer l'ami" : m_relationship == 3 ? L"Refuser" : L"Annuler la demande";
+        }
+
+    private:
+        std::wstring m_id, m_name, m_tag, m_subtitle, m_avatarUrl;
+        uint32_t m_statusColor;
+        int m_relationship;
     };
 
     struct MessageItem : MessageItemT<MessageItem>

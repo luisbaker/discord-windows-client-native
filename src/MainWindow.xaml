@@ -21,8 +21,18 @@
                 <TextBlock x:Name="TitleText" Text="Discord Win3" FontSize="13" FontWeight="SemiBold"
                            Foreground="{StaticResource HeaderTextBrush}" />
             </StackPanel>
-            <TextBlock x:Name="StatusText" Margin="16,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center"
-                       FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+            <StackPanel x:Name="NavButtons" Orientation="Horizontal" HorizontalAlignment="Left" Margin="8,0,0,0" Spacing="2">
+                <Button x:Name="BackButton" Click="OnNavigateBack" IsEnabled="False" Padding="8,4" Background="Transparent"
+                        BorderThickness="0" ToolTipService.ToolTip="Précédent (Alt+←)">
+                    <FontIcon Glyph="&#xE72B;" FontSize="12" />
+                </Button>
+                <Button x:Name="ForwardButton" Click="OnNavigateForward" IsEnabled="False" Padding="8,4" Background="Transparent"
+                        BorderThickness="0" ToolTipService.ToolTip="Suivant (Alt+→)">
+                    <FontIcon Glyph="&#xE72A;" FontSize="12" />
+                </Button>
+                <TextBlock x:Name="StatusText" Margin="10,0,0,0" VerticalAlignment="Center"
+                           FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+            </StackPanel>
         </Grid>
 
         <!-- ======================= Chat ======================= -->
@@ -91,16 +101,41 @@
                   BorderThickness="1,1,1,0" CornerRadius="8,0,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="48" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
-                    <StackPanel Orientation="Horizontal" Margin="16,0" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock x:Name="GuildTitle" FontWeight="SemiBold" FontSize="15" MaxWidth="230"
-                                   TextTrimming="CharacterEllipsis" Foreground="{StaticResource HeaderTextBrush}" />
-                        <FontIcon Glyph="&#xE70D;" FontSize="11" Foreground="{StaticResource HeaderTextBrush}" />
-                    </StackPanel>
+                    <Grid>
+                        <StackPanel x:Name="GuildHeader" Orientation="Horizontal" Margin="16,0" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock x:Name="GuildTitle" FontWeight="SemiBold" FontSize="15" MaxWidth="230"
+                                       TextTrimming="CharacterEllipsis" Foreground="{StaticResource HeaderTextBrush}" />
+                            <FontIcon Glyph="&#xE70D;" FontSize="11" Foreground="{StaticResource HeaderTextBrush}" />
+                        </StackPanel>
+                        <!-- Home: quick switcher entry, like the official client -->
+                        <Button x:Name="QuickSwitchButton" Visibility="Collapsed" Click="OnQuickSwitch" Margin="10,0"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="30" Padding="8,0"
+                                Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" CornerRadius="8"
+                                ToolTipService.ToolTip="Ctrl+K">
+                            <TextBlock Text="Recherche ou lance une conversation" FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{StaticResource BodyTextBrush}" />
+                        </Button>
+                    </Grid>
                 </Border>
-                <ListView x:Name="ChannelList" Grid.Row="1" SelectionMode="Single" IsItemClickEnabled="True"
+                <!-- Home: "Amis" entry + "Messages privés" header -->
+                <StackPanel x:Name="HomeNav" Grid.Row="1" Visibility="Collapsed" Padding="8,8,8,0" Spacing="4">
+                    <Button x:Name="FriendsNavButton" Click="OnShowFriends" HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left" Padding="12,8" CornerRadius="6" BorderThickness="0"
+                            Background="Transparent">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon Glyph="&#xE716;" FontSize="18" />
+                            <TextBlock Text="Amis" FontSize="15" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Button>
+                    <Rectangle Height="1" Fill="{StaticResource LineBrush}" Margin="8,4" />
+                    <TextBlock Text="Messages privés" Margin="8,4,0,0" FontSize="13" FontWeight="SemiBold"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                </StackPanel>
+                <ListView x:Name="ChannelList" Grid.Row="2" SelectionMode="Single" IsItemClickEnabled="True"
                           ItemClick="OnChannelClicked" SelectionChanged="OnChannelSelected" Padding="8,8,8,8">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
@@ -124,12 +159,21 @@
                                             Opacity="{x:Bind TextOpacity}">
                                     <TextBlock Text="{x:Bind Glyph}" Width="18" FontSize="16" Visibility="{x:Bind GlyphVisibility}"
                                                VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
-                                    <Border Visibility="{x:Bind AvatarVisibility}" Width="24" Height="24" CornerRadius="12"
-                                            Background="{StaticResource ComposerBrush}" VerticalAlignment="Center">
-                                        <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
-                                    </Border>
-                                    <TextBlock Text="{x:Bind Name}" FontSize="15" TextTrimming="CharacterEllipsis" MaxWidth="190"
-                                               VerticalAlignment="Center" Foreground="{x:Bind NameBrush}" FontWeight="{x:Bind NameWeight}" />
+                                    <Grid Visibility="{x:Bind AvatarVisibility}" Width="{x:Bind AvatarSize}" Height="{x:Bind AvatarSize}"
+                                          VerticalAlignment="Center">
+                                        <Border CornerRadius="16" Background="{StaticResource ComposerBrush}">
+                                            <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
+                                        </Border>
+                                        <Ellipse Visibility="{x:Bind StatusVisibility}" Width="12" Height="12" Margin="0,0,-2,-2"
+                                                 HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                 Fill="{x:Bind StatusBrush}" Stroke="{StaticResource SidebarBrush}" StrokeThickness="2" />
+                                    </Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind Name}" FontSize="15" TextTrimming="CharacterEllipsis" MaxWidth="190"
+                                                   Foreground="{x:Bind NameBrush}" FontWeight="{x:Bind NameWeight}" />
+                                        <TextBlock Text="{x:Bind Subtitle}" Visibility="{x:Bind SubtitleVisibility}" FontSize="12"
+                                                   TextTrimming="CharacterEllipsis" MaxWidth="190" Foreground="{StaticResource MutedTextBrush}" />
+                                    </StackPanel>
                                 </StackPanel>
                                 <Border Visibility="{x:Bind MentionVisibility}" MinWidth="16" Height="16" CornerRadius="8"
                                         Padding="4,0" Background="#F23F43" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -323,6 +367,112 @@
                 </Grid>
                 <TextBlock x:Name="TypingText" Grid.Row="3" Margin="18,2,16,0" FontSize="12" FontWeight="SemiBold"
                            TextTrimming="CharacterEllipsis" Foreground="{StaticResource BodyTextBrush}" />
+
+                <!-- ======================= Friends page (Home) ======================= -->
+                <Grid x:Name="FriendsView" Grid.RowSpan="4" Visibility="Collapsed" Background="{StaticResource ChatBrush}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="48" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="16,0">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE716;" FontSize="18" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Text="Amis" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"
+                                       Foreground="{StaticResource HeaderTextBrush}" Margin="0,0,8,0" />
+                            <Ellipse Width="4" Height="4" Fill="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                            <Button x:Name="TabOnline" Content="En ligne" Tag="online" Click="OnFriendsTab" Padding="10,4"
+                                    CornerRadius="6" BorderThickness="0" Background="Transparent" />
+                            <Button x:Name="TabAll" Content="Tous" Tag="all" Click="OnFriendsTab" Padding="10,4"
+                                    CornerRadius="6" BorderThickness="0" Background="Transparent" />
+                            <Button x:Name="TabPending" Content="En attente" Tag="pending" Click="OnFriendsTab" Padding="10,4"
+                                    CornerRadius="6" BorderThickness="0" Background="Transparent" />
+                            <Button x:Name="TabAdd" Content="Ajouter" Tag="add" Click="OnFriendsTab" Padding="10,4"
+                                    CornerRadius="6" BorderThickness="0" Style="{StaticResource AccentButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Search (list tabs) / add-friend form (Ajouter tab) -->
+                    <StackPanel Grid.Row="1" Padding="24,16,24,8" Spacing="8">
+                        <TextBox x:Name="FriendsSearch" PlaceholderText="Rechercher" TextChanged="OnFriendsSearchChanged" />
+                        <StackPanel x:Name="AddFriendPanel" Visibility="Collapsed" Spacing="8">
+                            <TextBlock Text="Ajouter" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource HeaderTextBrush}" />
+                            <TextBlock Text="Tu peux ajouter des amis grâce à leur nom d'utilisateur Discord." FontSize="14"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="AddFriendBox" PlaceholderText="Tu peux ajouter des amis grâce à leur nom d'utilisateur." />
+                                <Button Grid.Column="1" Content="Envoyer une demande d'ami" Click="OnSendFriendRequest"
+                                        Style="{StaticResource AccentButtonStyle}" />
+                            </Grid>
+                            <TextBlock x:Name="AddFriendResult" FontSize="13" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock x:Name="FriendsCount" FontSize="12" FontWeight="SemiBold" Margin="0,8,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+
+                    <ListView x:Name="FriendsList" Grid.Row="2" SelectionMode="None" Padding="16,0,16,8">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="Padding" Value="8,0" />
+                                <Setter Property="CornerRadius" Value="8" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:FriendItem">
+                                <Grid Height="62" ColumnSpacing="12" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Width="32" Height="32">
+                                        <Border CornerRadius="16" Background="{StaticResource ComposerBrush}">
+                                            <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
+                                        </Border>
+                                        <Ellipse Width="12" Height="12" Margin="0,0,-2,-2" HorizontalAlignment="Right"
+                                                 VerticalAlignment="Bottom" Fill="{x:Bind StatusBrush}"
+                                                 Stroke="{StaticResource ChatBrush}" StrokeThickness="2" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{x:Bind Name}" FontSize="15" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource HeaderTextBrush}" />
+                                            <Border Visibility="{x:Bind TagVisibility}" CornerRadius="4" Padding="5,0"
+                                                    Background="#2E2F35" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind Tag}" FontSize="11" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource HeaderTextBrush}" />
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock Text="{x:Bind Subtitle}" FontSize="13" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <Button Tag="{x:Bind Id}" Click="OnFriendMessage" Visibility="{x:Bind MessageVisibility}"
+                                                Width="36" Height="36" CornerRadius="18" Padding="0" Background="{StaticResource PanelBrush}"
+                                                BorderThickness="0" ToolTipService.ToolTip="Message">
+                                            <FontIcon Glyph="&#xE8BD;" FontSize="14" />
+                                        </Button>
+                                        <Button Tag="{x:Bind Id}" Click="OnFriendAccept" Visibility="{x:Bind AcceptVisibility}"
+                                                Width="36" Height="36" CornerRadius="18" Padding="0" Background="{StaticResource PanelBrush}"
+                                                BorderThickness="0" ToolTipService.ToolTip="Accepter">
+                                            <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="#23A55A" />
+                                        </Button>
+                                        <Button Tag="{x:Bind Id}" Click="OnFriendRemove" Width="36" Height="36" CornerRadius="18"
+                                                Padding="0" Background="{StaticResource PanelBrush}" BorderThickness="0"
+                                                ToolTipService.ToolTip="{x:Bind RemoveLabel}">
+                                            <FontIcon Glyph="&#xE711;" FontSize="12" Foreground="#F23F43" />
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
             </Grid>
 
             <!-- Member list -->
