@@ -6,6 +6,7 @@ namespace DiscordWin3::Discord
 {
     inline constexpr uint64_t PermAdministrator = 1ull << 3;
     inline constexpr uint64_t PermViewChannel = 1ull << 10;
+    inline constexpr uint64_t PermSendMessages = 1ull << 11;
 
     // Compact copy of a channel permission overwrite (the JSON is dropped after parsing).
     struct Overwrite
@@ -29,5 +30,6 @@ namespace DiscordWin3::Discord
 
         // Standard Discord algorithm: base (roles) -> @everyone overwrite -> role overwrites -> member overwrite.
         bool CanView(std::vector<Overwrite> const& overwrites) const;
+        bool Has(std::vector<Overwrite> const& overwrites, uint64_t bit) const;
     };
 }

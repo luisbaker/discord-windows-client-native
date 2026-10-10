@@ -82,6 +82,11 @@ namespace winrt::DiscordWin3::implementation
         void OnSettings(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnAddServer(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnDiscover(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnEmbedImageTapped(IInspectable const&, Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const&);
+        winrt::fire_and_forget OnShowPins(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget OnSearchKeyDown(IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
+        void ShowMessagesFlyout(Microsoft::UI::Xaml::FrameworkElement const& anchor, std::wstring const& title,
+                                Windows::Data::Json::JsonArray const& messages, std::wstring const& empty);
         void OnVoiceDisconnect(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnToggleMute(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnToggleDeafen(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);

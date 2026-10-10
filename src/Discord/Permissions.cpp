@@ -22,6 +22,11 @@ namespace DiscordWin3::Discord
 
     bool GuildPermissions::CanView(std::vector<Overwrite> const& overwrites) const
     {
+        return Has(overwrites, PermViewChannel);
+    }
+
+    bool GuildPermissions::Has(std::vector<Overwrite> const& overwrites, uint64_t bit) const
+    {
         if (!known || selfId == ownerId)
         {
             return true;
@@ -65,6 +70,6 @@ namespace DiscordWin3::Discord
         }
         perms = (perms & ~roleDeny) | roleAllow;
         perms = (perms & ~memberDeny) | memberAllow;
-        return (perms & PermViewChannel) != 0;
+        return (perms & bit) == bit;
     }
 }

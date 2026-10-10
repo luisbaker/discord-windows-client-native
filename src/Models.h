@@ -72,6 +72,12 @@ namespace DiscordWin3
         std::wstring embedTitle;
         std::wstring embedDescription;
         uint32_t embedColor = 0;
+        std::wstring embedAuthor;
+        std::wstring embedUrl;
+        std::wstring embedImageUrl;   // picture inside the card (YouTube thumbnail...)
+        double embedImageWidth = 0;
+        double embedImageHeight = 0;
+        bool embedIsVideo = false;
         uint32_t color = 0;       // top role color (0xRRGGBB), 0 = default
         bool own = false;          // written by the logged-in user
         bool mentionsMe = false;
@@ -277,6 +283,13 @@ namespace winrt::DiscordWin3::implementation
         Visibility EmbedTitleVisibility() const { return Show(!m_d.embedTitle.empty()); }
         hstring EmbedDescription() const { return hstring{ m_d.embedDescription }; }
         Visibility EmbedDescriptionVisibility() const { return Show(!m_d.embedDescription.empty()); }
+        hstring EmbedAuthor() const { return hstring{ m_d.embedAuthor }; }
+        Visibility EmbedAuthorVisibility() const { return Show(!m_d.embedAuthor.empty()); }
+        ImageSource EmbedImage();
+        Visibility EmbedImageVisibility() const { return Show(!m_d.embedImageUrl.empty()); }
+        double EmbedImageWidth() const { return m_d.embedImageWidth; }
+        double EmbedImageHeight() const { return m_d.embedImageHeight; }
+        Visibility EmbedPlayVisibility() const { return Show(m_d.embedIsVideo); }
 
         ::DiscordWin3::MessageData const& Data() const { return m_d; }
         bool ShowsHeader() const { return m_showHeader; }
@@ -293,9 +306,14 @@ namespace winrt::DiscordWin3::implementation
         // Group header row.
         MemberItem(std::wstring groupTitle) : m_isGroup(true), m_name(std::move(groupTitle)) {}
         // Member row. status: "online" | "idle" | "dnd" | other = offline.
-        MemberItem(std::wstring name, uint32_t color, std::wstring avatarUrl, std::wstring status, std::wstring activity)
+        MemberItem(std::wstring name, uint32_t color, std::wstring avatarUrl, std::wstring status, std::wstring activity,
+                   bool bot = false, std::wstring tag = {})
             : m_isGroup(false), m_name(std::move(name)), m_color(color), m_avatarUrl(std::move(avatarUrl)),
-              m_status(std::move(status)), m_activity(std::move(activity)) {}
+              m_status(std::move(status)), m_activity(std::move(activity)), m_bot(bot), m_tag(std::move(tag)) {}
+
+        Visibility BotVisibility() const { return Show(m_bot); }
+        hstring Tag() const { return hstring{ m_tag }; }
+        Visibility TagVisibility() const { return Show(!m_tag.empty() && !m_bot); }
 
         bool IsGroup() const { return m_isGroup; }
         hstring Name() const { return hstring{ m_name }; }
@@ -317,5 +335,7 @@ namespace winrt::DiscordWin3::implementation
         std::wstring m_avatarUrl;
         std::wstring m_status;
         std::wstring m_activity;
+        bool m_bot = false;
+        std::wstring m_tag;
     };
 }

@@ -92,6 +92,13 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Visibility EmbedTitleVisibility { get; };
         String EmbedDescription { get; };
         Microsoft.UI.Xaml.Visibility EmbedDescriptionVisibility { get; };
+        String EmbedAuthor { get; };
+        Microsoft.UI.Xaml.Visibility EmbedAuthorVisibility { get; };
+        Microsoft.UI.Xaml.Media.ImageSource EmbedImage { get; };
+        Microsoft.UI.Xaml.Visibility EmbedImageVisibility { get; };
+        Double EmbedImageWidth { get; };
+        Double EmbedImageHeight { get; };
+        Microsoft.UI.Xaml.Visibility EmbedPlayVisibility { get; };
     }
 
     runtimeclass FriendItem
@@ -130,5 +137,8 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Visibility GroupVisibility { get; };
         Microsoft.UI.Xaml.Visibility MemberVisibility { get; };
         Microsoft.UI.Xaml.Visibility ActivityVisibility { get; };
+        Microsoft.UI.Xaml.Visibility BotVisibility { get; };
+        String Tag { get; };
+        Microsoft.UI.Xaml.Visibility TagVisibility { get; };
     }
 }

@@ -139,7 +139,7 @@
                         <Button x:Name="QuickSwitchButton" Visibility="Collapsed" Click="OnQuickSwitch" Margin="10,0"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="30" Padding="8,0"
                                 Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" CornerRadius="8"
-                                ToolTipService.ToolTip="Ctrl+K">
+                               >
                             <TextBlock x:Name="QuickSwitchText" Text="Recherche ou lance une conversation" FontSize="13" FontWeight="SemiBold"
                                        Foreground="{StaticResource BodyTextBrush}" />
                         </Button>
@@ -288,15 +288,22 @@
                         <TextBlock x:Name="ChannelTitle" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"
                                    Foreground="{StaticResource HeaderTextBrush}" />
                     </StackPanel>
-                    <Button x:Name="CallButton" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Center"
-                            Margin="0,0,48,0" Click="OnStartCall" Background="Transparent" BorderThickness="0">
-                        <FontIcon Glyph="&#xE717;" FontSize="18" />
-                    </Button>
-                    <ToggleButton x:Name="MembersToggle" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                  IsChecked="True" Click="OnToggleMembers" Background="Transparent" BorderThickness="0"
-                                  ToolTipService.ToolTip="Afficher la liste des membres">
-                        <FontIcon Glyph="&#xE716;" FontSize="18" />
-                    </ToggleButton>
+                    <!-- Toolbar like the official client: call, pins, members, search -->
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="4">
+                        <Button x:Name="CallButton" Visibility="Collapsed" Click="OnStartCall" Style="{StaticResource HoverButton}">
+                            <FontIcon Glyph="&#xE717;" FontSize="18" Foreground="{StaticResource MutedTextBrush}" />
+                        </Button>
+                        <Button x:Name="PinsButton" Click="OnShowPins" Style="{StaticResource HoverButton}">
+                            <FontIcon Glyph="&#xE718;" FontSize="18" Foreground="{StaticResource MutedTextBrush}" />
+                        </Button>
+                        <ToggleButton x:Name="MembersToggle" VerticalAlignment="Center" Width="34" Height="32" Padding="0" CornerRadius="6"
+                                      IsChecked="True" Click="OnToggleMembers" Background="Transparent" BorderThickness="0">
+                            <FontIcon Glyph="&#xE716;" FontSize="18" />
+                        </ToggleButton>
+                        <TextBox x:Name="SearchBox" Width="240" Height="32" MinHeight="0" Margin="8,0,0,0" Padding="10,5,32,0"
+                                 FontSize="14" CornerRadius="8" BorderThickness="0" Background="{StaticResource ComposerBrush}"
+                                 KeyDown="OnSearchKeyDown" />
+                    </StackPanel>
                 </Grid>
 
                 <ListView x:Name="MessageList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="False"
@@ -413,14 +420,26 @@
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
                                             <Rectangle Fill="{x:Bind EmbedBar}" />
-                                            <StackPanel Grid.Column="1" Padding="12,8,16,12" Spacing="4">
+                                            <StackPanel Grid.Column="1" Padding="12,8,16,12" Spacing="6">
                                                 <TextBlock Text="{x:Bind EmbedProvider}" Visibility="{x:Bind EmbedProviderVisibility}"
                                                            FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Text="{x:Bind EmbedAuthor}" Visibility="{x:Bind EmbedAuthorVisibility}"
+                                                           FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource HeaderTextBrush}" />
                                                 <TextBlock Text="{x:Bind EmbedTitle}" Visibility="{x:Bind EmbedTitleVisibility}"
                                                            FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{StaticResource LinkBrush}" />
                                                 <TextBlock Text="{x:Bind EmbedDescription}" Visibility="{x:Bind EmbedDescriptionVisibility}"
                                                            FontSize="14" TextWrapping="Wrap" MaxLines="6" TextTrimming="CharacterEllipsis"
                                                            Foreground="{StaticResource BodyTextBrush}" />
+                                                <!-- Card picture (YouTube thumbnail...) with play badge; opens the link -->
+                                                <Grid Visibility="{x:Bind EmbedImageVisibility}" Width="{x:Bind EmbedImageWidth}"
+                                                      Height="{x:Bind EmbedImageHeight}" CornerRadius="4" HorizontalAlignment="Left"
+                                                      Margin="0,4,0,0" Tapped="OnEmbedImageTapped" Background="{StaticResource ComposerBrush}">
+                                                    <Image Source="{x:Bind EmbedImage}" Stretch="UniformToFill" />
+                                                    <Border Visibility="{x:Bind EmbedPlayVisibility}" Width="48" Height="48" CornerRadius="24"
+                                                            HorizontalAlignment="Center" VerticalAlignment="Center" Background="#B3000000">
+                                                        <FontIcon Glyph="&#xF5B0;" FontSize="18" Foreground="White" />
+                                                    </Border>
+                                                </Grid>
                                             </StackPanel>
                                         </Grid>
                                         <TextBlock Text="{x:Bind Files}" Visibility="{x:Bind FilesVisibility}"
@@ -725,8 +744,24 @@
                                                  Fill="{x:Bind StatusBrush}" Stroke="{StaticResource SidebarBrush}" StrokeThickness="2" />
                                     </Grid>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                        <TextBlock Text="{x:Bind Name}" FontSize="15" FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis" Foreground="{x:Bind NameBrush}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <TextBlock Text="{x:Bind Name}" FontSize="15" MaxWidth="150"
+                                                       TextTrimming="CharacterEllipsis" Foreground="{x:Bind NameBrush}" />
+                                            <!-- Verified app badge (bots) -->
+                                            <Border Visibility="{x:Bind BotVisibility}" CornerRadius="4" Padding="4,0,5,0"
+                                                    Background="#5865F2" VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" Spacing="2">
+                                                    <FontIcon Glyph="&#xE73E;" FontSize="9" Foreground="White" />
+                                                    <TextBlock Text="APP" FontSize="10" FontWeight="Bold" Foreground="White" />
+                                                </StackPanel>
+                                            </Border>
+                                            <!-- Server tag -->
+                                            <Border Visibility="{x:Bind TagVisibility}" CornerRadius="4" Padding="4,0"
+                                                    Background="#2E2F35" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind Tag}" FontSize="10" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource HeaderTextBrush}" />
+                                            </Border>
+                                        </StackPanel>
                                         <TextBlock Text="{x:Bind Activity}" Visibility="{x:Bind ActivityVisibility}" FontSize="12"
                                                    TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}" />
                                     </StackPanel>

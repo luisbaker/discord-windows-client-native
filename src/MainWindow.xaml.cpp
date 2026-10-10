@@ -1632,6 +1632,18 @@ namespace winrt::DiscordWin3::implementation
         LoadChannel(std::wstring{ item.Id() }, std::wstring{ item.Name() });
         Composer().PlaceholderText(I18n::Fmt(m_currentGuildId == HomeId ? I18n::S::SendMessageTo : I18n::S::SendMessageIn,
                                                std::wstring{ item.Name() }));
+        // Read-only channel: disabled input with the official notice instead of a failing send.
+        std::wstring guildId;
+        if (auto channel = FindChannel(std::wstring{ item.Id() }, &guildId); channel && !guildId.empty())
+        {
+            auto guild = FindGuild(guildId);
+            if (guild && !guild->perms.Has(channel->overwrites, Discord::PermSendMessages))
+            {
+                Composer().IsEnabled(false);
+                AttachButton().IsEnabled(false);
+                Composer().PlaceholderText(I18n::Tr(I18n::S::NoSendPermission));
+            }
+        }
         UpdateTitle();
     }
 
@@ -1672,12 +1684,14 @@ namespace winrt::DiscordWin3::implementation
         {
             auto name = ChannelTitle().Text();
             TitleText().Text(name.empty() ? hstring{ I18n::Tr(I18n::S::DirectMessages) } : name);
+            SearchBox().PlaceholderText(I18n::Fmt(I18n::S::SearchIn, std::wstring{ name.empty() ? hstring{ I18n::Tr(I18n::S::DirectMessages) } : name }));
             TitleIcon().Source(ChannelAvatar().Source());
             return;
         }
         if (auto guild = FindGuild(m_currentGuildId))
         {
             TitleText().Text(guild->name);
+            SearchBox().PlaceholderText(I18n::Fmt(I18n::S::SearchIn, guild->name));
             TitleIcon().Source(guild->icon.empty() ? nullptr
                 : ::DiscordWin3::ImageCache::Get(std::wstring{ Discord::CdnBase } + L"/icons/" + guild->id + L"/" + guild->icon + L".png?size=96", 16));
         }
@@ -2592,21 +2606,47 @@ namespace winrt::DiscordWin3::implementation
             {
                 if (e.ValueType() != JsonValueType::Object) continue;
                 auto o = e.GetObject();
-                for (auto key : { L"image", L"thumbnail" })
+                auto type = Json::Str(o, L"type");
+                bool card = data.embedTitle.empty() && data.embedDescription.empty()
+                            && (!Json::Str(o, L"title").empty() || !Json::Str(o, L"description").empty());
+                // Bare image / gif links render as the message image; cards (YouTube, articles) carry
+                // their picture inside the card like the official client.
+                if (!card || type == L"image" || type == L"gifv")
                 {
-                    if (auto img = Json::Obj(o, key))
+                    for (auto key : { L"image", L"thumbnail" })
                     {
-                        if (setImage(Json::Str(img, L"proxy_url"), Json::Num(img, L"width"), Json::Num(img, L"height"))) break;
+                        if (auto img = Json::Obj(o, key))
+                        {
+                            if (setImage(Json::Str(img, L"proxy_url"), Json::Num(img, L"width"), Json::Num(img, L"height"))) break;
+                        }
                     }
                 }
-                if (data.embedTitle.empty() && data.embedDescription.empty())
+                if (card)
                 {
+                    for (auto key : { L"image", L"thumbnail" })
+                    {
+                        auto img = Json::Obj(o, key);
+                        double w = Json::Num(img, L"width"), h = Json::Num(img, L"height");
+                        auto proxy = Json::Str(img, L"proxy_url");
+                        if (proxy.empty() || w <= 0 || h <= 0) continue;
+                        double scale = std::min({ 1.0, 400.0 / w, 225.0 / h });
+                        data.embedImageWidth = std::floor(w * scale);
+                        data.embedImageHeight = std::floor(h * scale);
+                        data.embedImageUrl = proxy + (proxy.find(L'?') == std::wstring::npos ? L"?" : L"&")
+                            + L"width=" + std::to_wstring(static_cast<int>(std::min(w, data.embedImageWidth * 2)))
+                            + L"&height=" + std::to_wstring(static_cast<int>(std::min(h, data.embedImageHeight * 2)));
+                        break;
+                    }
+                    data.embedIsVideo = Json::Obj(o, L"video") != nullptr;
+                    data.embedUrl = Json::Str(o, L"url");
+                    data.embedAuthor = Json::Str(Json::Obj(o, L"author"), L"name");
                     data.embedProvider = Json::Str(Json::Obj(o, L"provider"), L"name");
-                    if (data.embedProvider.empty()) data.embedProvider = Json::Str(Json::Obj(o, L"author"), L"name");
+                    if (data.embedProvider.empty() && !data.embedAuthor.empty()) std::swap(data.embedProvider, data.embedAuthor);
                     data.embedTitle = Json::Str(o, L"title");
                     auto description = Json::Str(o, L"description");
                     data.embedDescription = PlainText(description.substr(0, 350), m);
                     data.embedColor = static_cast<uint32_t>(Json::Num(o, L"color"));
+                    if (data.embedIsVideo) data.embedDescription.clear();   // video cards: author, title, player only
                 }
             }
         }
@@ -2726,12 +2766,17 @@ namespace winrt::DiscordWin3::implementation
         auto const& cachedMember = m_members[guild.id][userId];
 
         auto presence = Json::Obj(member, L"presence");
+        std::wstring tag;
+        auto primaryGuild = Json::Obj(user, L"primary_guild");
+        if (primaryGuild && Json::Bool(primaryGuild, L"identity_enabled", true)) tag = Json::Str(primaryGuild, L"tag");
         return make<MemberItem>(
             cachedMember.nick.empty() ? cachedUser.name : cachedMember.nick,
             cachedMember.color,
             cachedMember.avatarUrl.empty() ? cachedUser.avatarUrl : cachedMember.avatarUrl,
             Json::Str(presence, L"status"),
-            ActivityText(Json::Arr(presence, L"activities")));
+            ActivityText(Json::Arr(presence, L"activities")),
+            Json::Bool(user, L"bot"),
+            std::move(tag));
     }
 
     void MainWindow::OnMemberListUpdate(Slim::Value const& d)
@@ -4194,6 +4239,7 @@ namespace winrt::DiscordWin3::implementation
         tip(SettingsButton(), S::Settings);
         tip(AddServerButton(), S::AddServer);
         tip(DiscoverButton(), S::Discover);
+        tip(PinsButton(), S::PinnedMessages);
         UpdateVoiceButtons();
         tip(QuickSwitchButton(), S::QuickSwitch);
     }
@@ -4257,6 +4303,153 @@ namespace winrt::DiscordWin3::implementation
             if (e.Key() == Windows::System::VirtualKey::Enter) submit();
         });
         flyout.ShowAt(sender.as<FrameworkElement>());
+    }
+
+    void MainWindow::ShowMessagesFlyout(FrameworkElement const& anchor, std::wstring const& title, JsonArray const& messages,
+                                        std::wstring const& empty)
+    {
+        // Compact message cards (pins / search results), like the official popouts.
+        StackPanel list;
+        list.Spacing(8);
+        TextBlock header;
+        header.Text(title);
+        header.FontSize(16);
+        header.FontWeight(Windows::UI::Text::FontWeight{ 600 });
+        header.Margin({ 0, 0, 0, 4 });
+        list.Children().Append(header);
+        uint32_t shown = 0;
+        for (auto const& value : messages)
+        {
+            if (value.ValueType() != JsonValueType::Object) continue;
+            auto m = value.GetObject();
+            auto author = Json::Obj(m, L"author");
+            StackPanel card;
+            card.Padding({ 12, 10, 12, 10 });
+            card.CornerRadius({ 8, 8, 8, 8 });
+            card.Spacing(2);
+            card.Background(Application::Current().Resources().Lookup(box_value(L"ChatBrush")).as<Media::Brush>());
+            StackPanel line;
+            line.Orientation(Orientation::Horizontal);
+            line.Spacing(8);
+            Border avatarBorder;
+            avatarBorder.Width(20);
+            avatarBorder.Height(20);
+            avatarBorder.CornerRadius({ 10, 10, 10, 10 });
+            Image avatar;
+            avatar.Source(::DiscordWin3::ImageCache::Get(AvatarUrl(author), 20));
+            avatarBorder.Child(avatar);
+            TextBlock name;
+            name.Text(UserDisplayName(author));
+            name.FontWeight(Windows::UI::Text::FontWeight{ 600 });
+            TextBlock time;
+            time.Text(FormatTime(Json::SnowflakeMs(Json::Str(m, L"id"))));
+            time.FontSize(12);
+            time.VerticalAlignment(VerticalAlignment::Center);
+            time.Foreground(Application::Current().Resources().Lookup(box_value(L"MutedTextBrush")).as<Media::Brush>());
+            line.Children().Append(avatarBorder);
+            line.Children().Append(name);
+            line.Children().Append(time);
+            TextBlock body;
+            auto text = PlainText(Json::Str(m, L"content"), m);
+            if (text.empty())
+            {
+                auto attachments = Json::Arr(m, L"attachments");
+                text = attachments && attachments.Size() ? L"📎 " + std::wstring{ I18n::Tr(I18n::S::Attachment) } : L"";
+            }
+            body.Text(text);
+            body.TextWrapping(TextWrapping::Wrap);
+            body.MaxLines(6);
+            body.TextTrimming(TextTrimming::CharacterEllipsis);
+            body.IsTextSelectionEnabled(true);
+            card.Children().Append(line);
+            card.Children().Append(body);
+            list.Children().Append(card);
+            if (++shown >= 50) break;
+        }
+        if (!shown)
+        {
+            TextBlock none;
+            none.Text(empty);
+            none.TextWrapping(TextWrapping::Wrap);
+            none.Foreground(Application::Current().Resources().Lookup(box_value(L"MutedTextBrush")).as<Media::Brush>());
+            list.Children().Append(none);
+        }
+        ScrollViewer scroller;
+        scroller.Content(list);
+        scroller.MaxHeight(560);
+        scroller.Width(420);
+        Flyout flyout;
+        flyout.Content(scroller);
+        flyout.Placement(Primitives::FlyoutPlacementMode::BottomEdgeAlignedRight);
+        flyout.ShowAt(anchor);
+    }
+
+    fire_and_forget MainWindow::OnShowPins(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto strong = get_strong();
+        if (!m_rest || m_currentChannelId.empty()) co_return;
+        auto rest = m_rest;
+        auto channel = m_currentChannelId;
+        JsonArray pins;
+        try
+        {
+            auto json = co_await rest->GetJson(L"/channels/" + channel + L"/pins");
+            if (json.ValueType() == JsonValueType::Array) pins = json.GetArray();
+        }
+        catch (...)
+        {
+        }
+        co_await wil::resume_foreground(m_dispatcher);
+        if (channel != m_currentChannelId) co_return;
+        ShowMessagesFlyout(PinsButton(), I18n::Tr(I18n::S::PinnedMessages), pins, I18n::Tr(I18n::S::NoPins));
+    }
+
+    fire_and_forget MainWindow::OnSearchKeyDown(IInspectable const&, Input::KeyRoutedEventArgs const& e)
+    {
+        auto strong = get_strong();
+        if (e.Key() != Windows::System::VirtualKey::Enter) co_return;
+        e.Handled(true);
+        std::wstring query{ SearchBox().Text() };
+        if (!m_rest || query.empty() || m_currentChannelId.empty()) co_return;
+
+        // Guild-wide search like the official box; DMs search the conversation itself.
+        std::wstring encoded{ Windows::Foundation::Uri::EscapeComponent(query) };
+        bool guild = !m_currentGuildId.empty() && m_currentGuildId != HomeId;
+        std::wstring path = guild ? L"/guilds/" + m_currentGuildId + L"/messages/search?content=" + encoded
+                                  : L"/channels/" + m_currentChannelId + L"/messages/search?content=" + encoded;
+        auto rest = m_rest;
+        JsonArray found;
+        double total = 0;
+        try
+        {
+            auto json = co_await rest->GetJson(path);
+            if (json.ValueType() == JsonValueType::Object)
+            {
+                auto o = json.GetObject();
+                total = Json::Num(o, L"total_results");
+                // "messages" is an array of arrays (the hit plus context): keep the hit.
+                if (auto groups = Json::Arr(o, L"messages"))
+                {
+                    for (auto const& g : groups)
+                    {
+                        if (g.ValueType() == JsonValueType::Array && g.GetArray().Size() > 0) found.Append(g.GetArray().GetAt(0));
+                    }
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+        co_await wil::resume_foreground(m_dispatcher);
+        ShowMessagesFlyout(SearchBox(), I18n::Fmt(I18n::S::SearchResults, std::to_wstring(static_cast<int64_t>(total))),
+                           found, I18n::Tr(I18n::S::NoResults));
+    }
+
+    void MainWindow::OnEmbedImageTapped(IInspectable const& sender, Input::TappedRoutedEventArgs const&)
+    {
+        auto data = MessageFromSender(sender);
+        if (!data || data->embedUrl.empty()) return;
+        Windows::System::Launcher::LaunchUriAsync(Windows::Foundation::Uri{ data->embedUrl });
     }
 
     void MainWindow::OnDiscover(IInspectable const&, RoutedEventArgs const&)

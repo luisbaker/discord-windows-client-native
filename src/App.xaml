@@ -31,6 +31,27 @@
             <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#222225" />
             <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#26262A" />
 
+            <!-- Discord blurple instead of the Windows accent colour (toggles, accent buttons, focus) -->
+            <Color x:Key="SystemAccentColor">#5865F2</Color>
+            <Color x:Key="SystemAccentColorLight1">#7983F5</Color>
+            <Color x:Key="SystemAccentColorLight2">#949CF7</Color>
+            <Color x:Key="SystemAccentColorLight3">#B4B9F9</Color>
+            <Color x:Key="SystemAccentColorDark1">#4752C4</Color>
+            <Color x:Key="SystemAccentColorDark2">#3C45A5</Color>
+            <Color x:Key="SystemAccentColorDark3">#2D3480</Color>
+            <!-- Text boxes: no accent underline / border on focus, like the chat input -->
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+            <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
+            <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="Transparent" />
+            <!-- Header toggles (member list...) stay flat: icon tint only -->
+            <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="Transparent" />
+            <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#1AFFFFFF" />
+            <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#26FFFFFF" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#F2F3F5" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPointerOver" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ToggleButtonBorderBrushChecked" Color="Transparent" />
+
             <!-- Small square icon buttons of the message hover bar -->
             <Style x:Key="HoverButton" TargetType="Button">
                 <Setter Property="Width" Value="34" />

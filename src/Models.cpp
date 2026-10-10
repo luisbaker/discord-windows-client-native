@@ -84,6 +84,11 @@ namespace winrt::DiscordWin3::implementation
         return m_showHeader ? ::DiscordWin3::ImageCache::Get(m_d.avatarUrl, 40) : nullptr;
     }
 
+    ImageSource MessageItem::EmbedImage()
+    {
+        return ::DiscordWin3::ImageCache::Get(m_d.embedImageUrl, static_cast<int>(m_d.embedImageWidth));
+    }
+
     ImageSource MessageItem::ReplyAvatar()
     {
         return ::DiscordWin3::ImageCache::Get(m_d.replyAvatarUrl, 16);
