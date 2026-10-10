@@ -149,6 +149,7 @@
     <ClInclude Include="TokenStore.h" />
     <ClInclude Include="Strings.h" />
     <ClInclude Include="Theme.h" />
+    <ClInclude Include="Fonts.h" />
     <ClInclude Include="SlimJson.h" />
     <ClInclude Include="Voice\AesGcm.h" />
     <ClInclude Include="Voice\AudioEngine.h" />
@@ -178,6 +179,7 @@
     <ClCompile Include="TokenStore.cpp" />
     <ClCompile Include="Strings.cpp" />
     <ClCompile Include="Theme.cpp" />
+    <ClCompile Include="Fonts.cpp" />
     <ClCompile Include="SlimJson.cpp" />
     <ClCompile Include="Voice\AesGcm.cpp" />
     <ClCompile Include="Voice\AudioEngine.cpp" />

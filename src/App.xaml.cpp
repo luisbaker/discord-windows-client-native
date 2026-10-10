@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "App.xaml.h"
 #include "Theme.h"
+#include "Fonts.h"
 #include "MainWindow.xaml.h"
 
 using namespace winrt;
@@ -25,6 +26,7 @@ namespace winrt::DiscordWin3::implementation
     void App::OnLaunched(LaunchActivatedEventArgs const&)
     {
         ::DiscordWin3::Theme::Initialize();   // recolour shared brushes before the first page is built
+        ::DiscordWin3::Fonts::Initialize();    // gg sans (fetched once from discord.com, cached locally)
         m_window = make<MainWindow>();
         m_window.Activate();
     }
