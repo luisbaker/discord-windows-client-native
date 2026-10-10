@@ -80,6 +80,8 @@ namespace winrt::DiscordWin3::implementation
         void OnCancelReply(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnNavigateBack(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnSettings(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnAddServer(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnDiscover(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnVoiceDisconnect(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnToggleMute(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnToggleDeafen(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -159,6 +161,7 @@ namespace winrt::DiscordWin3::implementation
 
         // Animations
         void MorphGuild(Microsoft::UI::Xaml::UIElement const& root, bool squircle, bool animate);
+        void UpdateGuildPill(Microsoft::UI::Xaml::FrameworkElement const& iconHost, bool selected, bool hover);
         void UpdateGuildMorphs();
         void AnimateMessagesIn();
 
@@ -193,6 +196,7 @@ namespace winrt::DiscordWin3::implementation
 
         // Reactions
         void RenderReactions(Microsoft::UI::Xaml::Controls::StackPanel const& panel, ::DiscordWin3::MessageData const& data);
+        void RenderGallery(Microsoft::UI::Xaml::Controls::Grid const& grid, ::DiscordWin3::MessageData const& data);
         fire_and_forget ToggleReaction(std::wstring messageId, ::DiscordWin3::Reaction reaction);
         void OnReactionEvent(std::wstring const& type, Windows::Data::Json::JsonObject const& d);
 

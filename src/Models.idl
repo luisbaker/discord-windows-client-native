@@ -11,6 +11,7 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Media.ImageSource Icon { get; };
         Microsoft.UI.Xaml.Visibility IconVisibility { get; };
         Microsoft.UI.Xaml.Visibility InitialsVisibility { get; };
+        Microsoft.UI.Xaml.Visibility HomeVisibility { get; };
         Microsoft.UI.Xaml.Visibility UnreadVisibility { get; };
         String MentionText { get; };
         Microsoft.UI.Xaml.Visibility MentionVisibility { get; };
@@ -65,6 +66,17 @@ namespace DiscordWin3
         Microsoft.UI.Xaml.Visibility TagVisibility { get; };
         String ReplyText { get; };
         Microsoft.UI.Xaml.Visibility ReplyVisibility { get; };
+        Microsoft.UI.Xaml.Media.Brush MentionBar { get; };
+        Microsoft.UI.Xaml.Visibility ReplyBarVisibility { get; };
+        Microsoft.UI.Xaml.Media.ImageSource ReplyAvatar { get; };
+        String ReplyName { get; };
+        Microsoft.UI.Xaml.Media.Brush ReplyNameBrush { get; };
+        String ReplyTag { get; };
+        Microsoft.UI.Xaml.Visibility ReplyTagVisibility { get; };
+        String ReplySnippet { get; };
+        Windows.UI.Text.FontStyle ReplySnippetStyle { get; };
+        Microsoft.UI.Xaml.Visibility ReplyAttachmentVisibility { get; };
+        Microsoft.UI.Xaml.Visibility GalleryVisibility { get; };
         Microsoft.UI.Xaml.Media.ImageSource Image { get; };
         Microsoft.UI.Xaml.Visibility ImageVisibility { get; };
         Microsoft.UI.Xaml.Visibility VideoVisibility { get; };

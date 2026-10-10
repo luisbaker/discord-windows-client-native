@@ -50,7 +50,16 @@ namespace DiscordWin3
         std::wstring avatarUrl;   // already sized CDN url, empty if none
         std::wstring tag;         // server tag shown next to the name ("IPv6")
         std::vector<Segment> body;
-        std::wstring reply;       // "@name : snippet" for replies
+        std::wstring reply;       // plain header line ("Forwarded") when there is no structured reply
+        // Reply bar (official layout: curved connector, mini avatar, coloured name, tag, snippet).
+        std::wstring replyName;
+        std::wstring replyAvatarUrl;
+        std::wstring replyTag;
+        std::wstring replySnippet;
+        uint32_t replyColor = 0;
+        bool replyAttachmentOnly = false;
+        struct GalleryImage { std::wstring url, full; double width = 0, height = 0; };
+        std::vector<GalleryImage> gallery;   // every image when there are 2+ (mosaic), empty otherwise
         std::wstring timestamp;   // display string
         int64_t unixMs = 0;
         std::wstring imageUrl;    // first image attachment (proxied, resized)
@@ -91,7 +100,8 @@ namespace winrt::DiscordWin3::implementation
         hstring Initials() const { return m_initials; }
         ImageSource Icon();
         Visibility IconVisibility() const { return Show(!m_iconUrl.empty()); }
-        Visibility InitialsVisibility() const { return Show(m_iconUrl.empty()); }
+        Visibility InitialsVisibility() const { return Show(m_iconUrl.empty() && m_id != L"@me"); }
+        Visibility HomeVisibility() const { return Show(m_id == L"@me"); }
         Visibility UnreadVisibility() const { return Show(m_unread); }
         hstring MentionText() const { return m_mentions > 99 ? hstring{ L"99+" } : hstring{ std::to_wstring(m_mentions) }; }
         Visibility MentionVisibility() const { return Show(m_mentions > 0); }
@@ -230,7 +240,18 @@ namespace winrt::DiscordWin3::implementation
         ImageSource Avatar();
         Visibility HeaderVisibility() const { return Show(m_showHeader); }
         Microsoft::UI::Xaml::Thickness RowPadding() const { return { 16, m_showHeader ? 12.0 : 1.0, 16, 1 }; }
-        Brush RowBackground() const { return m_d.mentionsMe ? SolidBrush(0xF0B232, 0x18) : SolidBrush(0, 0); }
+        Brush RowBackground() const { return m_d.mentionsMe ? SolidBrush(0xF0B232, 0x14) : SolidBrush(0, 0); }
+        Brush MentionBar() const { return m_d.mentionsMe ? SolidBrush(0xF0B232) : SolidBrush(0, 0); }
+        Visibility ReplyBarVisibility() const { return Show(!m_d.replyName.empty()); }
+        ImageSource ReplyAvatar();
+        hstring ReplyName() const { return hstring{ L"@" + m_d.replyName }; }
+        Brush ReplyNameBrush() const { return SolidBrush(m_d.replyColor ? m_d.replyColor : 0xC4C9CE); }
+        hstring ReplyTag() const { return hstring{ m_d.replyTag }; }
+        Visibility ReplyTagVisibility() const { return Show(!m_d.replyTag.empty()); }
+        hstring ReplySnippet() const { return hstring{ m_d.replySnippet }; }
+        Windows::UI::Text::FontStyle ReplySnippetStyle() const { return m_d.replyAttachmentOnly ? Windows::UI::Text::FontStyle::Italic : Windows::UI::Text::FontStyle::Normal; }
+        Visibility ReplyAttachmentVisibility() const { return Show(m_d.replyAttachmentOnly); }
+        Visibility GalleryVisibility() const { return Show(!m_d.gallery.empty()); }
         Visibility ContentVisibility() const { return Show(m_d.HasBody()); }
         Visibility ReactionsVisibility() const { return Show(!m_d.reactions.empty()); }
         Visibility OwnVisibility() const { return Show(m_d.own); }

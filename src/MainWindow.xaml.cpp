@@ -6,6 +6,7 @@
 
 #include "Discord/Json.h"
 #include "ImageCache.h"
+#include "Theme.h"
 #include "TokenStore.h"
 #include "Strings.h"
 #include "MemLog.h"
@@ -121,7 +122,7 @@ namespace winrt::DiscordWin3::implementation
             wchar_t buf[64];
             if (delta == 0)
             {
-                swprintf_s(buf, L"%02d:%02d", local.wHour, local.wMinute); return I18n::Fmt(I18n::S::TodayAt, buf);
+                swprintf_s(buf, L"%02d:%02d", local.wHour, local.wMinute); return buf;   // today: time only (2025 client)
             }
             else if (delta == 1)
             {
@@ -138,7 +139,12 @@ namespace winrt::DiscordWin3::implementation
         {
             SYSTEMTIME local = ToLocal(unixMs);
             wchar_t buf[96]{};
-            GetDateFormatEx(I18n::LocaleName(I18n::Current()), DATE_LONGDATE, &local, nullptr, buf, 96, nullptr);
+            // "10 octobre 2026" / "October 10, 2026": long date without the weekday, like the separators of the official client.
+            auto locale = I18n::LocaleName(I18n::Current());
+            std::wstring_view name{ locale };
+            wchar_t const* format = name.starts_with(L"en") ? L"MMMM d, yyyy" : name.starts_with(L"de") ? L"d. MMMM yyyy"
+                                  : name.starts_with(L"pt") || name.starts_with(L"es") ? L"d 'de' MMMM 'de' yyyy" : L"d MMMM yyyy";
+            GetDateFormatEx(locale, 0, &local, format, buf, 96, nullptr);
             return buf;
         }
 
@@ -469,6 +475,17 @@ namespace winrt::DiscordWin3::implementation
 
     // ------------------------------------------------------------------ animations
 
+    void MainWindow::UpdateGuildPill(FrameworkElement const& iconHost, bool selected, bool hover)
+    {
+        // Rail-edge pill like the official client: 8px unread, 20px hover, 40px selected.
+        auto pill = iconHost.FindName(L"Pill").try_as<FrameworkElement>();
+        if (!pill) return;
+        auto item = iconHost.DataContext().try_as<DiscordWin3::GuildItem>();
+        bool unread = item && item.UnreadVisibility() == Visibility::Visible;
+        pill.Height(selected ? 40 : hover ? 20 : 8);
+        pill.Visibility(Show(selected || hover || unread));
+    }
+
     void MainWindow::MorphGuild(UIElement const& root, bool squircle, bool animate)
     {
         using namespace Microsoft::UI::Composition;
@@ -518,6 +535,7 @@ namespace winrt::DiscordWin3::implementation
 
         bool fresh = !root.Tag();
         MorphGuild(root, container.IsSelected(), false);
+        UpdateGuildPill(root, container.IsSelected(), false);
         if (!fresh)
         {
             return;
@@ -527,17 +545,26 @@ namespace winrt::DiscordWin3::implementation
         weak_ref<Primitives::SelectorItem> weakContainer{ container };
         weak_ref<FrameworkElement> weakRoot{ root };
         auto weakSelf = get_weak();
-        root.PointerEntered([weakSelf, weakRoot](IInspectable const&, Input::PointerRoutedEventArgs const&)
+        root.PointerEntered([weakSelf, weakRoot, weakContainer](IInspectable const&, Input::PointerRoutedEventArgs const&)
         {
             auto self = weakSelf.get();
-            if (auto r = weakRoot.get(); self && r) self->MorphGuild(r, true, true);
+            if (auto r = weakRoot.get(); self && r)
+            {
+                auto c = weakContainer.get();
+                self->MorphGuild(r, true, true);
+                self->UpdateGuildPill(r, c && c.IsSelected(), true);
+            }
         });
         root.PointerExited([weakSelf, weakRoot, weakContainer](IInspectable const&, Input::PointerRoutedEventArgs const&)
         {
             auto self = weakSelf.get();
             auto r = weakRoot.get();
             auto c = weakContainer.get();
-            if (self && r && c) self->MorphGuild(r, c.IsSelected(), true);
+            if (self && r && c)
+            {
+                self->MorphGuild(r, c.IsSelected(), true);
+                self->UpdateGuildPill(r, c.IsSelected(), false);
+            }
         });
     }
 
@@ -554,6 +581,7 @@ namespace winrt::DiscordWin3::implementation
             if (auto root = templateRoot ? templateRoot.FindName(L"IconHost").try_as<UIElement>() : nullptr)
             {
                 MorphGuild(root, container.IsSelected(), true);
+                UpdateGuildPill(root.as<FrameworkElement>(), container.IsSelected(), false);
             }
         }
     }
@@ -1535,6 +1563,7 @@ namespace winrt::DiscordWin3::implementation
         {
             return;
         }
+        ::DiscordWin3::MemLog(L"guild: select");
         m_currentGuildId = item.Id();
         m_memberItems.Clear();
         m_memberListGuild.clear();
@@ -1542,6 +1571,7 @@ namespace winrt::DiscordWin3::implementation
         UpdateHomeChrome();
         RefreshChannelList();
         UpdateTitle();
+        ::DiscordWin3::MemLog(L"guild: channels built", m_channelItems.Size());
 
         // Home opens on the friends page, like the official client.
         if (m_currentGuildId == HomeId)
@@ -2316,9 +2346,14 @@ namespace winrt::DiscordWin3::implementation
         if (args.InRecycleQueue())
         {
             body.Blocks().Clear();   // release inline images of rows scrolled away
+            if (auto gallery = root.FindName(L"Gallery").try_as<Grid>()) gallery.Children().Clear();
             return;
         }
         RenderBody(body, Impl(args.Item())->Data());
+        if (auto gallery = root.FindName(L"Gallery").try_as<Grid>())
+        {
+            RenderGallery(gallery, Impl(args.Item())->Data());
+        }
         if (auto reactions = root.FindName(L"Reactions").try_as<StackPanel>())
         {
             RenderReactions(reactions, Impl(args.Item())->Data());
@@ -2461,7 +2496,27 @@ namespace winrt::DiscordWin3::implementation
                 auto snippet = PlainText(Json::Str(ref, L"content"), ref);
                 if (snippet.size() > 100) snippet = snippet.substr(0, 100) + L"…";
                 for (auto& c : snippet) if (c == L'\n') c = L' ';
-                data.reply = L"↱ @" + UserDisplayName(Json::Obj(ref, L"author")) + L"  " + snippet;
+                auto refAuthor = Json::Obj(ref, L"author");
+                auto refId = Json::Str(refAuthor, L"id");
+                data.replyName = UserDisplayName(refAuthor);
+                data.replyAvatarUrl = AvatarUrl(refAuthor);
+                if (auto guild = m_members.find(m_currentGuildId); guild != m_members.end())
+                {
+                    if (auto member = guild->second.find(refId); member != guild->second.end())
+                    {
+                        if (!member->second.nick.empty()) data.replyName = member->second.nick;
+                        if (!member->second.avatarUrl.empty()) data.replyAvatarUrl = member->second.avatarUrl;
+                        data.replyColor = member->second.color;
+                    }
+                }
+                auto refGuild = Json::Obj(refAuthor, L"primary_guild");
+                if (refGuild && Json::Bool(refGuild, L"identity_enabled", true)) data.replyTag = Json::Str(refGuild, L"tag");
+                if (snippet.empty())
+                {
+                    data.replyAttachmentOnly = true;
+                    snippet = I18n::Tr(I18n::S::ClickToSeeAttachment);
+                }
+                data.replySnippet = std::move(snippet);
             }
             data.forceHeader = true;
             break;
@@ -2484,11 +2539,30 @@ namespace winrt::DiscordWin3::implementation
 
         if (auto attachments = Json::Arr(m, L"attachments"))
         {
+            // 2+ images: mosaic like the official client (all images, cropped tiles), never raw links.
+            int imageCount = 0;
+            for (auto const& a : attachments)
+            {
+                if (a.ValueType() == JsonValueType::Object && Json::Str(a.GetObject(), L"content_type").starts_with(L"image/")
+                    && Json::Num(a.GetObject(), L"width") > 0)
+                    ++imageCount;
+            }
             for (auto const& a : attachments)
             {
                 if (a.ValueType() != JsonValueType::Object) continue;
                 auto o = a.GetObject();
                 auto contentType = Json::Str(o, L"content_type");
+                if (imageCount >= 2 && contentType.starts_with(L"image/") && Json::Num(o, L"width") > 0)
+                {
+                    double w = Json::Num(o, L"width"), h = Json::Num(o, L"height");
+                    auto proxy = Json::Str(o, L"proxy_url");
+                    double scale = std::min(1.0, 600.0 / std::max(w, h));
+                    data.gallery.push_back({ proxy + (proxy.find(L'?') == std::wstring::npos ? L"?" : L"&")
+                                                 + L"width=" + std::to_wstring(static_cast<int>(w * scale))
+                                                 + L"&height=" + std::to_wstring(static_cast<int>(h * scale)),
+                                             Json::Str(o, L"url"), w, h });
+                    continue;
+                }
                 if (contentType.starts_with(L"image/") &&
                     setImage(Json::Str(o, L"proxy_url"), Json::Num(o, L"width"), Json::Num(o, L"height")))
                 {
@@ -2620,6 +2694,7 @@ namespace winrt::DiscordWin3::implementation
             m_memberItems.Clear();
         }
         m_memberListGuild = m_currentGuildId;
+        ::DiscordWin3::MemLog(L"members: subscribe", m_memberItems.Size());
         m_gateway->SubscribeMemberList(m_currentGuildId, m_currentChannelId);
     }
 
@@ -2664,6 +2739,7 @@ namespace winrt::DiscordWin3::implementation
         constexpr uint32_t MaxRows = 100;
         auto guild = FindGuild(Json::Str(d, L"guild_id"));
         auto ops = Json::Arr(d, L"ops");
+        ::DiscordWin3::MemLog(guild && guild->id == m_memberListGuild ? L"members: update (match)" : L"members: update (skip)", ops ? ops.Size() : 0);
         if (!guild || !ops || guild->id != m_memberListGuild)
         {
             return;
@@ -2701,6 +2777,10 @@ namespace winrt::DiscordWin3::implementation
                     }
                 }
                 m_memberItems.ReplaceAll(rows);
+                ::DiscordWin3::MemLog(L"members: sync rows", rows.size());
+                // After a full replace the virtualizing panel can stay empty (0 containers): rebind so it re-realizes.
+                MemberList().ItemsSource(nullptr);
+                MemberList().ItemsSource(m_memberItems);
             }
             else if (kind == L"INSERT" && index <= m_memberItems.Size() && index < MaxRows)
             {
@@ -3093,6 +3173,80 @@ namespace winrt::DiscordWin3::implementation
 
     // ------------------------------------------------------------------ reactions
 
+    void MainWindow::RenderGallery(Grid const& grid, MessageData const& data)
+    {
+        grid.Children().Clear();
+        auto const& images = data.gallery;
+        if (images.empty()) return;
+
+        // Official mosaic shapes: 2 side by side, 3 = big left + 2 stacked, 4 = 2x2, more = rows of 3
+        // (the first row takes the remainder). Built from stack panels: one cell, no spanning maths.
+        constexpr double W = 520, Gap = 4;
+        auto tile = [&](size_t index, double width, double height)
+        {
+            auto const& img = images[index];
+            Image image;
+            image.Stretch(Media::Stretch::UniformToFill);
+            image.Source(::DiscordWin3::ImageCache::Get(img.url, static_cast<int>(width)));
+            Border cell;
+            cell.Width(width);
+            cell.Height(height);
+            cell.Background(SolidBrush(0x1A1A1E));
+            cell.Child(image);
+            auto full = img.full;
+            cell.Tapped([full](IInspectable const&, Input::TappedRoutedEventArgs const&)
+            {
+                Windows::System::Launcher::LaunchUriAsync(Windows::Foundation::Uri{ full });
+            });
+            return cell;
+        };
+        auto row = []()
+        {
+            StackPanel p;
+            p.Orientation(Orientation::Horizontal);
+            p.Spacing(Gap);
+            return p;
+        };
+        StackPanel rows;
+        rows.Spacing(Gap);
+
+        size_t n = images.size();
+        if (n == 3)
+        {
+            double big = (W - Gap) * 2 / 3, narrow = W - Gap - big, h = 350;
+            auto r = row();
+            r.Children().Append(tile(0, big, h));
+            StackPanel column;
+            column.Spacing(Gap);
+            column.Children().Append(tile(1, narrow, (h - Gap) / 2));
+            column.Children().Append(tile(2, narrow, (h - Gap) / 2));
+            r.Children().Append(column);
+            rows.Children().Append(r);
+        }
+        else
+        {
+            size_t perRow = (n == 2 || n == 4) ? 2 : 3;
+            size_t first = perRow == 2 ? 0 : n % 3;
+            size_t index = 0;
+            if (first)
+            {
+                auto r = row();
+                double w = first == 1 ? W : (W - Gap) / 2;
+                for (size_t i = 0; i < first; ++i) r.Children().Append(tile(index++, w, first == 1 ? 280 : 220));
+                rows.Children().Append(r);
+            }
+            double w = (W - Gap * (perRow - 1)) / perRow;
+            double h = perRow == 2 ? (n == 2 ? w : w * 0.75) : w;
+            while (index < n)
+            {
+                auto r = row();
+                for (size_t c = 0; c < perRow && index < n; ++c) r.Children().Append(tile(index++, w, h));
+                rows.Children().Append(r);
+            }
+        }
+        grid.Children().Append(rows);
+    }
+
     void MainWindow::RenderReactions(StackPanel const& panel, MessageData const& data)
     {
         panel.Children().Clear();
@@ -3141,6 +3295,26 @@ namespace winrt::DiscordWin3::implementation
                 if (auto self = weak.get()) self->ToggleReaction(messageId, reaction);
             });
             panel.Children().Append(chip);
+        }
+        if (!data.reactions.empty())
+        {
+            // Trailing "add reaction" chip, like the official client.
+            FontIcon icon;
+            icon.Glyph(L"");
+            icon.FontSize(15);
+            icon.Foreground(SolidBrush(0xB5BAC1).as<Media::Brush>());
+            Button add;
+            add.Content(icon);
+            add.Padding({ 7, 3, 7, 3 });
+            add.MinHeight(0);
+            add.CornerRadius({ 8, 8, 8, 8 });
+            add.Background(SolidBrush(0x2B2D31));
+            add.BorderThickness({ 0, 0, 0, 0 });
+            add.Click([weak = get_weak()](IInspectable const& sender, RoutedEventArgs const& args)
+            {
+                if (auto self = weak.get()) self->OnHoverPicker(sender, args);
+            });
+            panel.Children().Append(add);
         }
     }
 
@@ -4018,8 +4192,76 @@ namespace winrt::DiscordWin3::implementation
         tip(ComposerEmojiButton(), S::PickEmoji);
         tip(CancelReplyButton(), S::CancelEsc);
         tip(SettingsButton(), S::Settings);
+        tip(AddServerButton(), S::AddServer);
+        tip(DiscoverButton(), S::Discover);
         UpdateVoiceButtons();
         tip(QuickSwitchButton(), S::QuickSwitch);
+    }
+
+    void MainWindow::OnAddServer(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        // Join through an invite link (the server arrives by GUILD_CREATE on the gateway).
+        StackPanel panel;
+        panel.Spacing(8);
+        panel.Width(320);
+        TextBlock title;
+        title.Text(I18n::Tr(I18n::S::AddServer));
+        title.FontWeight(Windows::UI::Text::FontWeight{ 600 });
+        TextBox box;
+        box.PlaceholderText(I18n::Tr(I18n::S::JoinServerHint));
+        Button join;
+        join.Content(box_value(I18n::Tr(I18n::S::JoinServer)));
+        join.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Microsoft::UI::Xaml::Style>());
+        join.HorizontalAlignment(HorizontalAlignment::Stretch);
+        TextBlock error;
+        error.Foreground(SolidBrush(0xF23F42).as<Media::Brush>());
+        error.TextWrapping(TextWrapping::Wrap);
+        panel.Children().Append(title);
+        panel.Children().Append(box);
+        panel.Children().Append(join);
+        panel.Children().Append(error);
+        Flyout flyout;
+        flyout.Content(panel);
+
+        auto submit = [weak = get_weak(), box, error, flyout]() -> fire_and_forget
+        {
+            auto self = weak.get();
+            if (!self || !self->m_rest) co_return;
+            std::wstring code{ box.Text() };
+            if (auto slash = code.find_last_of(L'/'); slash != std::wstring::npos) code = code.substr(slash + 1);
+            if (auto query = code.find(L'?'); query != std::wstring::npos) code.resize(query);
+            if (code.empty()) co_return;
+            auto rest = self->m_rest;
+            bool failed = false;
+            try
+            {
+                co_await rest->PostJson(L"/invites/" + code, JsonObject{});
+            }
+            catch (...)
+            {
+                failed = true;
+            }
+            co_await wil::resume_foreground(self->m_dispatcher);
+            if (!failed)
+            {
+                flyout.Hide();
+                co_return;
+            }
+            // Discord may require a captcha for joins from other clients: hand over to the browser.
+            Windows::System::Launcher::LaunchUriAsync(Windows::Foundation::Uri{ L"https://discord.gg/" + code });
+            flyout.Hide();
+        };
+        join.Click([submit](auto&&, auto&&) { submit(); });
+        box.KeyDown([submit](IInspectable const&, Input::KeyRoutedEventArgs const& e)
+        {
+            if (e.Key() == Windows::System::VirtualKey::Enter) submit();
+        });
+        flyout.ShowAt(sender.as<FrameworkElement>());
+    }
+
+    void MainWindow::OnDiscover(IInspectable const&, RoutedEventArgs const&)
+    {
+        Windows::System::Launcher::LaunchUriAsync(Windows::Foundation::Uri{ L"https://discord.com/discovery" });
     }
 
     void MainWindow::OnSettings(IInspectable const& sender, RoutedEventArgs const&)
@@ -4059,6 +4301,23 @@ namespace winrt::DiscordWin3::implementation
             language.Items().Append(item);
         }
         menu.Items().Append(language);
+
+        MenuFlyoutSubItem theme;
+        theme.Text(I18n::Tr(I18n::S::ThemeLabel));
+        FontIcon palette;
+        palette.Glyph(L"");
+        theme.Icon(palette);
+        for (int i = 0; i < static_cast<int>(::DiscordWin3::Theme::Kind::Count); ++i)
+        {
+            auto kind = static_cast<::DiscordWin3::Theme::Kind>(i);
+            RadioMenuFlyoutItem item;
+            item.Text(::DiscordWin3::Theme::Name(kind));
+            item.GroupName(L"theme");
+            item.IsChecked(kind == ::DiscordWin3::Theme::Current());
+            item.Click([kind](auto&&, auto&&) { ::DiscordWin3::Theme::Set(kind); });
+            theme.Items().Append(item);
+        }
+        menu.Items().Append(theme);
         menu.Items().Append(MenuFlyoutSeparator{});
 
         MenuFlyoutItem logout;

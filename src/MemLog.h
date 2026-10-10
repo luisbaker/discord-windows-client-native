@@ -20,7 +20,7 @@ namespace DiscordWin3
         FILE* f = nullptr;
         if (_wfopen_s(&f, path, L"a, ccs=UTF-8") == 0 && f)
         {
-            fwprintf(f, L"%-28s private=%6zu MB  ws=%6zu MB  extra=%zu\n", tag,
+            fwprintf(f, L"%8llu %-28s private=%6zu MB  ws=%6zu MB  extra=%zu\n", GetTickCount64() % 100000000, tag,
                      counters.PrivateUsage >> 20, counters.WorkingSetSize >> 20, extra);
             fclose(f);
         }

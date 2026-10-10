@@ -52,6 +52,7 @@
             <!-- Server rail -->
             <ListView x:Name="GuildList" Grid.Column="0" Background="{StaticResource RailBrush}"
                       SelectionMode="Single" SelectionChanged="OnGuildSelected" Padding="0,4,0,4"
+                      ScrollViewer.VerticalScrollBarVisibility="Hidden"
                       ContainerContentChanging="OnGuildContainerChanging">
                 <ListView.Resources>
                     <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="Transparent" />
@@ -64,18 +65,21 @@
                     <Style TargetType="ListViewItem">
                         <Setter Property="Padding" Value="0" />
                         <Setter Property="Margin" Value="0,4,0,4" />
-                        <Setter Property="HorizontalContentAlignment" Value="Center" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="MinWidth" Value="0" />
+                        <Setter Property="Width" Value="72" />
                         <Setter Property="MinHeight" Value="48" />
                         <Setter Property="Background" Value="Transparent" />
                     </Style>
                 </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:GuildItem">
+                        <StackPanel Width="72">
                         <!-- Rounded clip is applied and animated in code (circle <-> squircle). -->
                         <Grid Width="72" Height="48">
-                            <!-- Unread pill on the rail edge -->
-                            <Rectangle Visibility="{x:Bind UnreadVisibility}" Width="4" Height="8" RadiusX="2" RadiusY="2"
-                                       HorizontalAlignment="Left" Margin="-2,0,0,0" Fill="{StaticResource HeaderTextBrush}" />
+                            <!-- Rail-edge pill (8 unread / 20 hover / 40 selected), sized in code -->
+                            <Border x:Name="Pill" Visibility="{x:Bind UnreadVisibility}" Width="4" Height="8" CornerRadius="0,4,4,0"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center" Background="{StaticResource HeaderTextBrush}" />
                             <Grid x:Name="IconHost" Width="48" Height="48" ToolTipService.ToolTip="{x:Bind Name}"
                                   Background="{StaticResource ComposerBrush}">
                                 <TextBlock Text="{x:Bind Initials}" Visibility="{x:Bind InitialsVisibility}"
@@ -83,6 +87,10 @@
                                            FontSize="15" Foreground="{StaticResource HeaderTextBrush}" />
                                 <Image Source="{x:Bind Icon}" Visibility="{x:Bind IconVisibility}"
                                        Width="48" Height="48" Stretch="UniformToFill" />
+                                <!-- Home (direct messages): blurple tile with a white glyph -->
+                                <Grid Visibility="{x:Bind HomeVisibility}" Background="#5865F2">
+                                    <FontIcon Glyph="&#xE8F2;" FontSize="24" Foreground="White" />
+                                </Grid>
                             </Grid>
                             <!-- Mention badge -->
                             <Border Visibility="{x:Bind MentionVisibility}" MinWidth="18" Height="18" CornerRadius="9"
@@ -92,8 +100,24 @@
                                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
                             </Border>
                         </Grid>
+                        <!-- Separator under the home button -->
+                        <Rectangle Visibility="{x:Bind HomeVisibility}" Width="32" Height="2" RadiusX="1" RadiusY="1"
+                                   Margin="0,8,0,0" Fill="{StaticResource LineBrush}" />
+                        </StackPanel>
                     </DataTemplate>
                 </ListView.ItemTemplate>
+                <ListView.Footer>
+                    <StackPanel Width="72" Spacing="8" Margin="0,4,0,8">
+                        <Button x:Name="AddServerButton" Click="OnAddServer" Width="48" Height="48" CornerRadius="24" Padding="0"
+                                HorizontalAlignment="Center" BorderThickness="0" Background="{StaticResource ComposerBrush}">
+                            <FontIcon Glyph="&#xE710;" FontSize="18" Foreground="#23A55A" />
+                        </Button>
+                        <Button x:Name="DiscoverButton" Click="OnDiscover" Width="48" Height="48" CornerRadius="24" Padding="0"
+                                HorizontalAlignment="Center" BorderThickness="0" Background="{StaticResource ComposerBrush}">
+                            <FontIcon Glyph="&#xE909;" FontSize="18" Foreground="#23A55A" />
+                        </Button>
+                    </StackPanel>
+                </ListView.Footer>
             </ListView>
 
             <!-- Channel sidebar -->
@@ -307,17 +331,44 @@
                                     <Rectangle Grid.Column="2" Height="1" Fill="{StaticResource LineBrush}" VerticalAlignment="Center" />
                                 </Grid>
 
-                                <Grid Padding="{x:Bind RowPadding}" Background="{x:Bind RowBackground}" ColumnSpacing="16">
+                                <Grid Padding="{x:Bind RowPadding}" Background="{x:Bind RowBackground}" ColumnSpacing="16"
+                                      BorderBrush="{x:Bind MentionBar}" BorderThickness="2,0,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="40" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="40" Height="40" CornerRadius="20" VerticalAlignment="Top"
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <!-- Reply bar: curved connector from the avatar, mini avatar, @name, tag, snippet -->
+                                    <Border Grid.Row="0" Width="34" Height="12" Margin="18,8,-12,0" HorizontalAlignment="Left"
+                                            VerticalAlignment="Bottom" BorderThickness="2,2,0,0" CornerRadius="6,0,0,0"
+                                            BorderBrush="#4E5058" Visibility="{x:Bind ReplyBarVisibility}" />
+                                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="0,0,0,4"
+                                                Visibility="{x:Bind ReplyBarVisibility}">
+                                        <Border Width="16" Height="16" CornerRadius="8" Background="{StaticResource ComposerBrush}">
+                                            <Image Source="{x:Bind ReplyAvatar}" Stretch="UniformToFill" />
+                                        </Border>
+                                        <TextBlock Text="{x:Bind ReplyName}" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{x:Bind ReplyNameBrush}" VerticalAlignment="Center" />
+                                        <Border Visibility="{x:Bind ReplyTagVisibility}" CornerRadius="4" Padding="4,0"
+                                                Background="#2E2F35" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind ReplyTag}" FontSize="10" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource HeaderTextBrush}" />
+                                        </Border>
+                                        <TextBlock Text="{x:Bind ReplySnippet}" FontStyle="{x:Bind ReplySnippetStyle}" FontSize="13"
+                                                   MaxWidth="600" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                   Foreground="#B5BAC1" />
+                                        <FontIcon Glyph="&#xEB9F;" FontSize="14" Foreground="#B5BAC1" VerticalAlignment="Center"
+                                                  Visibility="{x:Bind ReplyAttachmentVisibility}" />
+                                    </StackPanel>
+                                    <Border Grid.Row="1" Width="40" Height="40" CornerRadius="20" VerticalAlignment="Top"
                                             Margin="0,2,0,0" Visibility="{x:Bind HeaderVisibility}"
                                             Background="{StaticResource ComposerBrush}">
                                         <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" />
                                     </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2">
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
                                         <TextBlock Text="{x:Bind ReplyText}" Visibility="{x:Bind ReplyVisibility}" FontSize="13"
                                                    TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}" />
                                         <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind HeaderVisibility}">
@@ -351,6 +402,9 @@
                                                 <FontIcon Glyph="&#xE896;" FontSize="14" Foreground="White" />
                                             </Button>
                                         </Grid>
+                                        <!-- 2+ images: mosaic, filled in code -->
+                                        <Grid x:Name="Gallery" Visibility="{x:Bind GalleryVisibility}" HorizontalAlignment="Left"
+                                              Margin="0,4,0,0" CornerRadius="8" RowSpacing="4" ColumnSpacing="4" />
                                         <!-- Link preview card -->
                                         <Grid Visibility="{x:Bind EmbedVisibility}" HorizontalAlignment="Left" MaxWidth="520"
                                               Margin="0,4,0,0" CornerRadius="4" Background="{StaticResource CardBrush}">

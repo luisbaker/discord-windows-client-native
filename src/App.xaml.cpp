@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "App.xaml.h"
+#include "Theme.h"
 #include "MainWindow.xaml.h"
 
 using namespace winrt;
@@ -23,6 +24,7 @@ namespace winrt::DiscordWin3::implementation
 
     void App::OnLaunched(LaunchActivatedEventArgs const&)
     {
+        ::DiscordWin3::Theme::Initialize();   // recolour shared brushes before the first page is built
         m_window = make<MainWindow>();
         m_window.Activate();
     }

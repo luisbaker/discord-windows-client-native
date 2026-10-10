@@ -11,13 +11,13 @@
             </ResourceDictionary.MergedDictionaries>
 
             <!-- Discord "dark" palette (2025+ refresh) -->
-            <SolidColorBrush x:Key="RailBrush" Color="#121214" />
-            <SolidColorBrush x:Key="SidebarBrush" Color="#121214" />
-            <SolidColorBrush x:Key="ChatBrush" Color="#1A1A1E" />
-            <SolidColorBrush x:Key="ComposerBrush" Color="#222327" />
-            <SolidColorBrush x:Key="PanelBrush" Color="#1E1F22" />
-            <SolidColorBrush x:Key="CardBrush" Color="#202024" />
-            <SolidColorBrush x:Key="LineBrush" Color="#2A2A2F" />
+            <SolidColorBrush x:Key="RailBrush" Color="#0E0E10" />
+            <SolidColorBrush x:Key="SidebarBrush" Color="#0E0E10" />
+            <SolidColorBrush x:Key="ChatBrush" Color="#0E0E10" />
+            <SolidColorBrush x:Key="ComposerBrush" Color="#18181B" />
+            <SolidColorBrush x:Key="PanelBrush" Color="#161618" />
+            <SolidColorBrush x:Key="CardBrush" Color="#18181B" />
+            <SolidColorBrush x:Key="LineBrush" Color="#222226" />
             <SolidColorBrush x:Key="BlurpleBrush" Color="#5865F2" />
             <SolidColorBrush x:Key="MutedTextBrush" Color="#949BA4" />
             <SolidColorBrush x:Key="HeaderTextBrush" Color="#F2F3F5" />
@@ -25,11 +25,11 @@
             <SolidColorBrush x:Key="LinkBrush" Color="#00A8FC" />
 
             <!-- Flat list rows like Discord (no accent pill, soft hover) -->
-            <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#1D1D21" />
-            <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#2C2C31" />
-            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#2C2C31" />
-            <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#26262B" />
-            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#2C2C31" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#19191C" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#26262A" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#26262A" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#222225" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#26262A" />
 
             <!-- Small square icon buttons of the message hover bar -->
             <Style x:Key="HoverButton" TargetType="Button">

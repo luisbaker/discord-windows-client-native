@@ -35,6 +35,11 @@
     X(Logout, L"Se déconnecter", L"Log Out", L"Terminar sessão", L"Sair", L"Cerrar sesión", L"Abmelden", L"Esci") \
     X(Settings, L"Paramètres", L"User Settings", L"Definições", L"Configurações", L"Ajustes", L"Einstellungen", L"Impostazioni") \
     X(Language, L"Langue", L"Language", L"Idioma", L"Idioma", L"Idioma", L"Sprache", L"Lingua") \
+    X(ThemeLabel, L"Thème", L"Theme", L"Tema", L"Tema", L"Tema", L"Design", L"Tema") \
+    X(AddServer, L"Ajouter un serveur", L"Add a Server", L"Adicionar um servidor", L"Adicionar um servidor", L"Añadir un servidor", L"Server hinzufügen", L"Aggiungi un server") \
+    X(JoinServerHint, L"Lien d'invitation (ex. https://discord.gg/abc)", L"Invite link (e.g. https://discord.gg/abc)", L"Link de convite (ex. https://discord.gg/abc)", L"Link de convite (ex. https://discord.gg/abc)", L"Enlace de invitación (p. ej. https://discord.gg/abc)", L"Einladungslink (z. B. https://discord.gg/abc)", L"Link di invito (es. https://discord.gg/abc)") \
+    X(JoinServer, L"Rejoindre", L"Join", L"Entrar", L"Entrar", L"Unirse", L"Beitreten", L"Unisciti") \
+    X(Discover, L"Découvrir", L"Discover", L"Descobrir", L"Descobrir", L"Descubrir", L"Entdecken", L"Esplora") \
     X(ShowMembers, L"Afficher la liste des membres", L"Show Member List", L"Mostrar lista de membros", L"Mostrar lista de membros", L"Mostrar lista de miembros", L"Mitgliederliste anzeigen", L"Mostra elenco membri") \
     X(AttachFile, L"Envoyer un fichier", L"Upload a File", L"Carregar um ficheiro", L"Enviar um arquivo", L"Subir un archivo", L"Datei hochladen", L"Carica un file") \
     X(CancelEsc, L"Annuler (Échap)", L"Cancel (Esc)", L"Cancelar (Esc)", L"Cancelar (Esc)", L"Cancelar (Esc)", L"Abbrechen (Esc)", L"Annulla (Esc)") \
@@ -88,6 +93,7 @@
     X(Uploading, L"Envoi de {0}…", L"Uploading {0}…", L"A enviar {0}…", L"Enviando {0}…", L"Subiendo {0}…", L"{0} wird hochgeladen…", L"Caricamento di {0}…") \
     X(Attachment, L"Pièce jointe", L"Attachment", L"Anexo", L"Anexo", L"Archivo adjunto", L"Anhang", L"Allegato") \
     X(ImageWord, L"Image", L"Image", L"Imagem", L"Imagem", L"Imagen", L"Bild", L"Immagine") \
+    X(ClickToSeeAttachment, L"Clique pour voir les pièces jointes", L"Click to see attachment", L"Clica para ver o anexo", L"Clique para ver o anexo", L"Haz clic para ver el adjunto", L"Klicke, um den Anhang anzusehen", L"Clicca per vedere l'allegato") \
     X(StickerLabel, L"[Autocollant : {0}]", L"[Sticker: {0}]", L"[Autocolante: {0}]", L"[Figurinha: {0}]", L"[Sticker: {0}]", L"[Sticker: {0}]", L"[Sticker: {0}]") \
     X(SysJoined, L"→ a rejoint le serveur.", L"→ joined the server.", L"→ entrou no servidor.", L"→ entrou no servidor.", L"→ se unió al servidor.", L"→ ist dem Server beigetreten.", L"→ è entrato nel server.") \
     X(SysPinned, L"📌 a épinglé un message.", L"📌 pinned a message.", L"📌 afixou uma mensagem.", L"📌 fixou uma mensagem.", L"📌 fijó un mensaje.", L"📌 hat eine Nachricht angeheftet.", L"📌 ha fissato un messaggio.") \
@@ -155,6 +161,7 @@ namespace DiscordWin3::I18n
     wchar_t const* NativeName(Lang lang);    // "Français", "English"...
     wchar_t const* LocaleName(Lang lang);    // "fr-FR"... for dates
     wchar_t const* DiscordLocale(Lang lang); // X-Discord-Locale header value
+    std::wstring SettingsFile();             // %LOCALAPPDATA%/DiscordWin3/settings.ini (shared by other settings)
 
     wchar_t const* Tr(S key);
     std::wstring Fmt(S key, std::wstring_view a0, std::wstring_view a1 = {});

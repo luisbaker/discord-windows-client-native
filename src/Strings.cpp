@@ -91,6 +91,7 @@ namespace DiscordWin3::I18n
     }
 
     Lang Current() { return g_current; }
+    std::wstring SettingsFile() { return SettingsPath(); }
     wchar_t const* NativeName(Lang lang) { return g_langs[static_cast<int>(lang)].native; }
     wchar_t const* LocaleName(Lang lang) { return g_langs[static_cast<int>(lang)].locale; }
     wchar_t const* DiscordLocale(Lang lang) { return g_langs[static_cast<int>(lang)].discord; }
